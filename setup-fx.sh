@@ -700,12 +700,15 @@ FLAGS
   --cpus N               default 2
   --pids N               default 256
   --image NAME           default fx-sandbox:latest
-  --allow-yolo           Permit --yolo (off by default)
+  --allow-yolo           Interactive yolo (sets FX_PERMISSION_MODE; no --yolo flag needed)
   --dry-run              Print the docker argv and exit
   -h, --help
 
 Always on: --user $uid:$gid, --cap-drop ALL, no-new-privileges,
 read-only rootfs, tmpfs home, no docker.sock. Refuses /, $HOME, /Users.
+
+  fxs run --allow-yolo                 # interactive, yolo via env
+  fxs run --allow-yolo -- ask --yolo "…"  # one-shot (ask accepts --yolo)
 EOF
 }
 
@@ -940,20 +943,36 @@ if [[ $GITCONFIG -eq 1 && -f "${HOME}/.gitconfig" ]]; then
 fi
 
 # If the caller passed nothing, drop into interactive fx.
-# Flags like --yolo are fx flags, not a command name.
+# Flags like --yolo are not a command name.
 if [[ ${#FX_ARGS[@]} -eq 0 ]]; then
   FX_ARGS=(fx)
 elif [[ "${FX_ARGS[0]}" == -* ]]; then
   FX_ARGS=(fx "${FX_ARGS[@]}")
 fi
 
+# Interactive `fx` has no --yolo flag (only `fx ask --yolo` does).
+# --allow-yolo turns the mode on via FX_PERMISSION_MODE and strips a
+# stray top-level --yolo so we do not get "unknown subcommand".
 if [[ $ALLOW_YOLO -eq 1 ]]; then
+  DOCKER_ARGS+=(-e "FX_PERMISSION_MODE=yolo")
+  _kept=()
+  _keep_yolo=0
   for a in "${FX_ARGS[@]}"; do
-    if [[ "$a" == "--yolo" || "$a" == "yolo" ]]; then
-      DOCKER_ARGS+=(-e "FX_PERMISSION_MODE=yolo")
-      break
-    fi
+    case "$a" in
+      ask) _keep_yolo=1; _kept+=("$a") ;;
+      --yolo|yolo)
+        if [[ $_keep_yolo -eq 1 ]]; then
+          _kept+=("$a")
+        fi
+        ;;
+      *) _kept+=("$a") ;;
+    esac
   done
+  FX_ARGS=("${_kept[@]}")
+  if [[ ${#FX_ARGS[@]} -eq 0 ]]; then
+    FX_ARGS=(fx)
+  fi
+  log "yolo on (FX_PERMISSION_MODE=yolo) — fx policy + os-sandbox off; container still applies"
 fi
 
 if [[ $ALLOW_YOLO -eq 0 ]]; then
