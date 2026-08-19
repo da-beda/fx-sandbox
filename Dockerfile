@@ -27,7 +27,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FX_PERMISSION_MODE=auto \
     FX_HOME=/home/fx/.fx \
     HOME=/home/fx \
-    PATH=/usr/local/bin:/usr/bin:/bin
+    PATH=/usr/local/bin:/usr/sbin:/usr/bin:/bin
 
 # Slim package set (no compiler toolchain). Retries + optional mirror
 # because Docker Desktop on macOS often flakes on ports.ubuntu.com:80.
@@ -45,14 +45,14 @@ RUN set -eu; \
       passwd ca-certificates curl tar gzip git bash; \
     rm -rf /var/lib/apt/lists/*; \
     if ! getent group fx >/dev/null; then \
-      groupadd --gid "${FX_GID}" fx 2>/dev/null || groupadd fx; \
+      /usr/sbin/groupadd --gid "${FX_GID}" fx 2>/dev/null || /usr/sbin/groupadd fx; \
     fi; \
     if ! id fx >/dev/null 2>&1; then \
-      useradd --uid "${FX_UID}" --gid fx \
+      /usr/sbin/useradd --uid "${FX_UID}" --gid fx \
         --create-home --home-dir /home/fx \
         --shell /bin/bash \
         --comment "fx sandbox user" fx \
-      2>/dev/null || useradd --gid fx \
+      2>/dev/null || /usr/sbin/useradd --gid fx \
         --create-home --home-dir /home/fx \
         --shell /bin/bash \
         --comment "fx sandbox user" fx; \
