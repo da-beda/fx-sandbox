@@ -195,7 +195,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-command -v docker >/dev/null 2>&1 || die "docker is not on PATH. ./setup-fx.sh --host --with-docker  (macOS: install Docker Desktop and start Docker.app first)"
+command -v docker >/dev/null 2>&1 || {
+  printf 'run-fx: error: docker is not on PATH\n' >&2
+  printf '  macOS : brew install --cask docker && open -a Docker\n' >&2
+  printf '  Linux : ./setup-fx.sh --host --with-docker\n' >&2
+  printf '  native: on macOS, fx already uses the OS sandbox — no Docker needed:\n' >&2
+  printf '          fx ask --no-save "hi"\n' >&2
+  exit 1
+}
+
+if ! docker info >/dev/null 2>&1; then
+  printf 'run-fx: error: Docker is installed but the daemon is not running\n' >&2
+  printf '  macOS : open -a Docker   # wait until the whale in the menu bar is idle\n' >&2
+  printf '          then: docker info && run-fx\n' >&2
+  printf '  Linux : sudo systemctl start docker\n' >&2
+  printf '  native: on macOS you can skip Docker entirely:\n' >&2
+  printf '          fx ask --no-save "hi"\n' >&2
+  exit 1
+fi
 
 [[ "$(id -u)" -eq 0 ]] && die "do not run this wrapper as root; it would map uid 0 into the container"
 

@@ -35,15 +35,31 @@ chmod +x setup-fx.sh
 
 ## Use
 
+In the **same** terminal that ran `curl | bash`, load PATH + key first
+(the parent shell cannot be changed by a pipe):
+
 ```bash
-cd /path/to/one/project
-setup-fx.sh run                          # interactive fx in a container
-setup-fx.sh ask "what is 17*19?"         # one-shot
-run-fx                                   # same as `setup-fx.sh run` (on PATH)
-fx ask --no-save "Reply with: GLM52_OK"  # native fx, no container
+export PATH="$HOME/.local/bin:$PATH"
+set -a && . ~/.config/fx/env && set +a
 ```
 
-On Linux, prefer `setup-fx.sh run`. Native fx has **no OS sandbox** there.
+Or just open a new tab.
+
+```bash
+cd /path/to/one/project
+fx ask --no-save "Reply with: GLM52_OK"   # native (macOS has an OS sandbox)
+setup-fx run                               # container; needs Docker running
+setup-fx ask "what is 17*19?"
+run-fx                                     # same as setup-fx run
+```
+
+`fx` on PATH is a tiny wrapper that sources `~/.config/fx/env` before
+execing the real binary, so you do not need `export` after a re-install.
+
+On Linux, prefer `setup-fx run`. Native fx has **no OS sandbox** there.
+
+On macOS, `run-fx` needs **Docker Desktop open** (whale idle in the
+menu bar). If you only want native fx, skip Docker.
 
 ## API key
 
