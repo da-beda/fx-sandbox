@@ -59,6 +59,8 @@ On Linux, native fx has no OS sandbox — prefer `fxs run`.
 | | |
 | --- | --- |
 | `fxs` / `fxs run` | Sandboxed fx against `$PWD` |
+| `fxs run -c` | Resume last fxs session in this directory |
+| `fxs sessions` | List fxs sessions for `$PWD` |
 | `fxs ask …` | One-shot `fx ask` in that container |
 | `fxs build` | Build `fx-sandbox:latest` |
 | `fxs status` | Binary, key, Docker, image, PATH |
@@ -69,6 +71,25 @@ On Linux, native fx has no OS sandbox — prefer `fxs run`.
 
 `setup-fx`, `setup-fx.sh`, `run-fx`, and `fx-sandbox` stay on PATH as
 aliases of `fxs` so older docs keep working.
+
+## Sessions
+
+`fxs` keeps **its own** sessions, per project, under
+`~/.local/share/fx-sandbox/state/<hash>/`. Host `~/.fx` is never mounted
+(that would leak every native session into the box).
+
+Inside the container the project is always `/workspace`, so a single
+global volume would mix “last” across repos. The hash is of the host path.
+
+```bash
+fxs run                  # saves automatically
+fxs run -c               # resume last fxs session in $PWD
+fxs run --resume last
+fxs sessions             # list
+fxs run --no-persist     # ephemeral tmpfs home
+```
+
+Native `fx -c` still reads `~/.fx` and does not see fxs sessions.
 
 ## API key
 

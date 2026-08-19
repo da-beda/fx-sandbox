@@ -100,6 +100,7 @@ COMMANDS
   install              Install fx + this toolkit (default for setup-fx.sh)
   run  [fx-args…]      Sandboxed fx against $PWD (default for `fxs`)
   ask  [fx-args…]      One-shot: run -- fx ask …
+  sessions             List fxs sessions for this directory
   build                Build the fx-sandbox Docker image
   status               What is installed, keyed, and running
   key                  (Re)prompt for a Vercel AI Gateway key
@@ -120,6 +121,7 @@ AFTER INSTALL
   fx           native agent — wrapper loads ~/.config/fx/env
   fxs          this command (also: fx-sandbox)
   fxs status   check this machine
+  fxs run -c   resume last fxs session in \$PWD
 
 The API key is stored in ~/.config/fx/env (0600), never in the image.
 Companion files are embedded; the only extra download is the fx tarball.
@@ -135,6 +137,11 @@ parse_args() {
       install|unpack|build|run|ask|status|key|uninstall|doctor|help)
         CMD="$1"
         shift
+        ;;
+      sessions|session)
+        CMD="run"
+        RUN_ARGS=("$@")
+        return 0
         ;;
       -h|--help)
         usage; exit 0
@@ -669,7 +676,7 @@ IMAGE="${FX_IMAGE_NAME:-fx-sandbox:latest}"
 WORKSPACE="${FX_WORKSPACE:-$PWD}"
 ENV_FILE=""
 NAME=""
-PERSIST_STATE=0
+PERSIST_STATE="${FXS_PERSIST:-1}"
 READ_ONLY_WS=0
 GITCONFIG=0
 NETWORK="${FX_NETWORK:-bridge}"
@@ -679,6 +686,7 @@ PIDS="${FX_PIDS:-256}"
 ALLOW_YOLO=0
 PULL=0
 DRY=0
+STATE_ROOT="${FXS_STATE_ROOT:-${HOME}/.local/share/fx-sandbox/state}"
 
 usage() {
   cat <<'EOF'
@@ -693,7 +701,8 @@ FLAGS
   --read-only-workspace  Mount the project read-only
   --env-file FILE        Extra env file (must be 0600)
   --name NAME            Container name (default: ephemeral)
-  --persist-state        Keep ~/.fx sessions in a named docker volume
+  --persist-state        Keep sessions (default). Same as FXS_PERSIST=1
+  --no-persist           Ephemeral ~/.fx (tmpfs only; nothing to resume)
   --gitconfig            Mount $HOME/.gitconfig read-only
   --network NET          Default bridge. `none` denies egress.
   --memory SIZE          default 2g
@@ -707,7 +716,14 @@ FLAGS
 Always on: --user $uid:$gid, --cap-drop ALL, no-new-privileges,
 read-only rootfs, tmpfs home, no docker.sock. Refuses /, $HOME, /Users.
 
+Sessions are stored per host project under
+  ~/.local/share/fx-sandbox/state/<hash>/
+Host ~/.fx is never mounted. Resume only sees fxs sessions for this directory.
+
   fxs run --allow-yolo                 # interactive, yolo via env
+  fxs run -c                           # resume last fxs session here
+  fxs run --resume last
+  fxs sessions                         # list (inside the box)
   fxs run --allow-yolo -- ask --yolo "…"  # one-shot (ask accepts --yolo)
 EOF
 }
@@ -730,6 +746,20 @@ abs_path() {
   dir="$(dirname "$target")"
   base="$(basename "$target")"
   (cd "$dir" && printf '%s/%s\n' "$(pwd -P)" "$base")
+}
+
+ws_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | awk '{print substr($1,1,16)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 | awk '{print substr($1,1,16)}'
+  else
+    die "need sha256sum or shasum to name the session dir"
+  fi
+}
+
+state_dir_for() {
+  printf '%s/%s\n' "$STATE_ROOT" "$(ws_hash "$1")"
 }
 
 is_dangerous_workspace() {
@@ -780,6 +810,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --name) NAME="$2"; shift 2 ;;
     --persist-state) PERSIST_STATE=1; shift ;;
+    --no-persist) PERSIST_STATE=0; shift ;;
     --gitconfig) GITCONFIG=1; shift ;;
     --network) NETWORK="$2"; shift 2 ;;
     --memory) MEMORY="$2"; shift 2 ;;
@@ -934,9 +965,14 @@ if [[ -n "$NAME" ]]; then
   DOCKER_ARGS+=(--name "$NAME")
 fi
 if [[ $PERSIST_STATE -eq 1 ]]; then
-  # Named volume keeps sessions, not the API key (key stays in env).
-  local_vol="fx-state-$(id -u)"
-  DOCKER_ARGS+=(--mount "type=volume,src=${local_vol},dst=/home/fx/.fx")
+  # Per-host-project dir. A single global volume would make every repo
+  # look like /workspace and mix "last" sessions.
+  _state="$(state_dir_for "$WORKSPACE")"
+  mkdir -p "${_state}"
+  chmod 0700 "${_state}" 2>/dev/null || true
+  printf '%s\n' "$WORKSPACE" > "${_state}/origin"
+  DOCKER_ARGS+=(--mount "type=bind,src=${_state},dst=/home/fx/.fx")
+  log "sessions=${_state}  (fxs run -c resumes last here)"
 fi
 if [[ $GITCONFIG -eq 1 && -f "${HOME}/.gitconfig" ]]; then
   DOCKER_ARGS+=(--mount "type=bind,src=${HOME}/.gitconfig,dst=/home/fx/.gitconfig,readonly")
@@ -1629,9 +1665,10 @@ cmd_key() {
 }
 
 cmd_uninstall() {
-  local dest kit
+  local dest kit state
   dest="$(install_dir_for_mode)"
   kit="$(kit_dest)"
+  state="${HOME}/.local/share/fx-sandbox/state"
 
   cat >&2 <<EOF
 ${LOG_PREFIX} uninstall will remove:
@@ -1662,15 +1699,15 @@ EOF
   if ! { : < /dev/tty; } 2>/dev/null; then
     return 0
   fi
-  printf '%s also delete ~/.fx and ~/.config/fx (API key)? [y/N] (30s) ' "${LOG_PREFIX}" >&2
+  printf '%s also delete ~/.fx, ~/.config/fx, and fxs session state? [y/N] (30s) ' "${LOG_PREFIX}" >&2
   local ans2="" st2=0
   IFS= read -r -t 30 ans2 < /dev/tty || st2=$?
   printf '\n' >&2
   if [[ $st2 -eq 0 && "$ans2" =~ ^[Yy]$ ]]; then
-    rm -rf "${HOME}/.fx" "${HOME}/.config/fx"
-    ok "removed profile and key file"
+    rm -rf "${HOME}/.fx" "${HOME}/.config/fx" "$state"
+    ok "removed profile, key file, and ${state}"
   else
-    log "left ~/.fx and ~/.config/fx in place"
+    log "left ~/.fx, ~/.config/fx, and ${state} in place"
   fi
 }
 
