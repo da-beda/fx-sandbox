@@ -1,0 +1,67 @@
+# Sandboxed fx agent.
+#
+#   cp .env.example .env          # put the key here, chmod 600
+#   docker compose build
+#   docker compose run --rm fx
+#   docker compose run --rm fx ask "Summarise this repo"
+#
+# Override the project dir:
+#   FX_WORKSPACE=/absolute/path/to/project docker compose run --rm fx
+#
+# This file is the safe-by-default shape. Do not add privileged: true,
+# do not mount /var/run/docker.sock, do not bind-mount $HOME.
+
+name: fx-sandbox
+
+services:
+  fx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FX_MODEL: ${FX_MODEL:-zai/glm-5.2}
+    image: ${FX_IMAGE_NAME:-fx-sandbox:latest}
+    working_dir: /workspace
+    user: "${FX_UID:-1000}:${FX_GID:-1000}"
+    read_only: true
+    stdin_open: true
+    tty: true
+    init: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+      - /home/fx:rw,nosuid,nodev,mode=700,size=128m
+    volumes:
+      - type: bind
+        source: ${FX_WORKSPACE:-.}
+        target: /workspace
+        bind:
+          create_host_path: false
+      # Optional durable session store. The API key is NOT kept here.
+      - type: volume
+        source: fx-state
+        target: /home/fx/.fx
+    environment:
+      HOME: /home/fx
+      FX_HOME: /home/fx/.fx
+      FX_DISABLE_KEYCHAIN: "1"
+      FX_MODEL: ${FX_MODEL:-zai/glm-5.2}
+      FX_PERMISSION_MODE: ${FX_PERMISSION_MODE:-auto}
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      TERM: ${TERM:-xterm-256color}
+    env_file:
+      - path: .env
+        required: false
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${FX_MEMORY:-2g}
+    cpus: ${FX_CPUS:-2.0}
+    # Default bridge: fx must reach ai-gateway.vercel.sh and releases.fx.sh.
+    # Set FX_NETWORK=none in .env to deny all egress (offline review only).
+    network_mode: ${FX_NETWORK_MODE:-bridge}
+
+volumes:
+  fx-state:
+    name: fx-state-${FX_UID:-1000}

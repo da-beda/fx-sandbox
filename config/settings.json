@@ -1,0 +1,8 @@
+{
+  "model": "zai/glm-5.2",
+  "permission_mode": "auto",
+  "sandbox": "none",
+  "auto_upgrade": false,
+  "update_channel": "stable",
+  "fast_mode": false
+}

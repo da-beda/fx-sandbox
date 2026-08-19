@@ -1,0 +1,5 @@
+{
+  "sandbox": "none",
+  "max_agent_steps": 40,
+  "max_tool_result_bytes": 200000
+}
