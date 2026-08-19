@@ -210,10 +210,10 @@ in_container() {
   [[ -f /.dockerenv ]] && return 0
   [[ -f /run/.containerenv ]] && return 0
   [[ "${container:-}" == "docker" || "${container:-}" == "podman" ]] && return 0
-  if [[ -r /proc/1/cgroup ]]; then
-    grep -Eq 'docker|lxc|containerd|kubepods|libpod|podman' /proc/1/cgroup && return 0
+  if [[ -r /proc/1/cgroup ]] && grep -Eq 'docker|lxc|containerd|kubepods|libpod|podman' /proc/1/cgroup 2>/dev/null; then
+    return 0
   fi
-  if [[ -r /proc/1/environ ]] && tr '\0' '\n' < /proc/1/environ 2>/dev/null | grep -q '^container='; then
+  if tr '\0' '\n' < /proc/1/environ 2>/dev/null | grep -q '^container='; then
     return 0
   fi
   return 1
