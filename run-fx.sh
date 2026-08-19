@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# run-fx.sh — launch the sandboxed fx container against ONE host directory.
+# Internal docker launcher. Prefer the public command:  fxs run
 #
-# The mounted directory is the only host path fx can write. The rest of
-# your machine (home, SSH keys, Docker socket, other repos) stays out.
-#
-#   ./run-fx.sh                         # interactive fx in $PWD
-#   ./run-fx.sh ask "what is 17*19?"    # one-shot
-#   ./run-fx.sh --workspace ~/src/app
-#   ./run-fx.sh --read-only-workspace ask "review this repo"
+#   fxs run                         # interactive fx in $PWD
+#   fxs ask "what is 17*19?"
+#   fxs run -w ~/src/app
+#   fxs run --read-only-workspace ask "review this repo"
 #
 # Required on the host:
 #   docker, the image built by setup-fx.sh --build-image (or `docker compose build`)
@@ -53,56 +50,36 @@ DRY=0
 
 usage() {
   cat <<'EOF'
-run-fx.sh — run fx inside a locked-down container
+fxs run — fx inside a locked-down container
 
 USAGE
-  ./run-fx.sh [wrapper-flags] [--] [fx-args...]
+  fxs run [flags] [--] [fx-args...]
+  fxs ask [fx-args...]
 
-WRAPPER FLAGS
+FLAGS
   -w, --workspace DIR    Host directory to mount at /workspace (default: $PWD)
-  --read-only-workspace  Mount the project read-only (review / Q&A only)
-  --env-file FILE        Extra env file (must be 0600; use for the API key)
+  --read-only-workspace  Mount the project read-only
+  --env-file FILE        Extra env file (must be 0600)
   --name NAME            Container name (default: ephemeral)
   --persist-state        Keep ~/.fx sessions in a named docker volume
-  --gitconfig            Mount $HOME/.gitconfig read-only (author identity)
-  --network NET          Docker network (default: bridge). Use `none` to deny egress.
-  --memory SIZE          e.g. 2g (default)
-  --cpus N               e.g. 2 (default)
-  --pids N               pids-limit (default: 256)
-  --image NAME           Override image (default: fx-sandbox:latest)
-  --pull                 docker pull/build reminder only; we do not pull secrets
-  --allow-yolo           Permit --yolo / FX_PERMISSION_MODE=yolo (off by default)
+  --gitconfig            Mount $HOME/.gitconfig read-only
+  --network NET          Default bridge. `none` denies egress.
+  --memory SIZE          default 2g
+  --cpus N               default 2
+  --pids N               default 256
+  --image NAME           default fx-sandbox:latest
+  --allow-yolo           Permit --yolo (off by default)
   --dry-run              Print the docker argv and exit
-  -h, --help             Show this help
+  -h, --help
 
-SAFETY DEFAULTS (always on)
-  * --user $(id -u):$(id -g)     files in the volume belong to you
-  * --cap-drop ALL
-  * --security-opt no-new-privileges
-  * --read-only                  image rootfs is immutable
-  * tmpfs /tmp and $HOME
-  * no /var/run/docker.sock
-  * refuses to mount /, $HOME, /etc, or a path that contains a docker socket
-  * refuses --privileged / --yolo unless you pass --allow-yolo
-
-EXAMPLES
-  export AI_GATEWAY_API_KEY='vck_…'
-  ./run-fx.sh                              # TTY session on the current repo
-  ./run-fx.sh ask --no-save "Summarise README.md"
-  ./run-fx.sh -w ~/src/myapp --persist-state
-  ./run-fx.sh --read-only-workspace ask "Find the SQL injection"
-
-DO NOT
-  * mount your home directory as the workspace
-  * pass -v /var/run/docker.sock
-  * run with --privileged
-  * bake the API key into the image
+Always on: --user $uid:$gid, --cap-drop ALL, no-new-privileges,
+read-only rootfs, tmpfs home, no docker.sock. Refuses /, $HOME, /Users.
 EOF
 }
 
-die()  { printf 'run-fx: error: %s\n' "$*" >&2; exit 1; }
-warn() { printf 'run-fx: warn: %s\n' "$*" >&2; }
-log()  { printf 'run-fx: %s\n' "$*" >&2; }
+die()  { printf 'fxs: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'fxs: warn: %s\n' "$*" >&2; }
+log()  { printf 'fxs: %s\n' "$*" >&2; }
 
 abs_path() {
   local target="$1"
@@ -196,21 +173,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v docker >/dev/null 2>&1 || {
-  printf 'run-fx: error: docker is not on PATH\n' >&2
+  printf 'fxs: error: docker is not on PATH\n' >&2
   printf '  macOS : brew install --cask docker && open -a Docker\n' >&2
-  printf '  Linux : ./setup-fx.sh --host --with-docker\n' >&2
-  printf '  native: on macOS, fx already uses the OS sandbox — no Docker needed:\n' >&2
-  printf '          fx ask --no-save "hi"\n' >&2
+  printf '  Linux : fxs install --with-docker\n' >&2
+  printf '  native: on macOS, skip Docker — fx already uses the OS sandbox\n' >&2
   exit 1
 }
 
 if ! docker info >/dev/null 2>&1; then
-  printf 'run-fx: error: Docker is installed but the daemon is not running\n' >&2
-  printf '  macOS : open -a Docker   # wait until the whale in the menu bar is idle\n' >&2
-  printf '          then: docker info && run-fx\n' >&2
+  printf 'fxs: error: Docker is installed but the daemon is not running\n' >&2
+  printf '  macOS : open -a Docker   # wait until the whale is idle\n' >&2
+  printf '          then: docker info && fxs run\n' >&2
   printf '  Linux : sudo systemctl start docker\n' >&2
-  printf '  native: on macOS you can skip Docker entirely:\n' >&2
-  printf '          fx ask --no-save "hi"\n' >&2
+  printf '  native: on macOS you can skip Docker:  fx ask --no-save "hi"\n' >&2
   exit 1
 fi
 

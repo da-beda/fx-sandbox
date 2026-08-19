@@ -1,12 +1,16 @@
 # fx-sandbox
 
-One Bash script that installs [fx](https://fx.sh) (Vercel Labs’ coding agent)
-and, if you want it, a locked-down Docker sandbox so the agent only sees
-**one project directory**.
+Install [fx](https://fx.sh) (Vercel Labs’ coding agent) and, optionally,
+run it in a Docker sandbox that can see **one project directory**.
 
-Works on **macOS** (Intel and Apple Silicon, including stock Bash 3.2)
-and **Linux**. You only need `setup-fx.sh` — the Dockerfile, entrypoint,
-compose file, and `run-fx` wrapper are embedded in it.
+macOS (Intel + Apple Silicon, stock Bash 3.2) and Linux.
+
+After install you type two commands:
+
+| Command | Meaning |
+| --- | --- |
+| `fx` | Native agent. Wrapper loads your API key. |
+| `fxs` | This toolkit: sandbox, status, key, uninstall. |
 
 ## Install
 
@@ -14,137 +18,115 @@ compose file, and `run-fx` wrapper are embedded in it.
 curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/setup-fx.sh | bash
 ```
 
-That installs the `fx` binary, writes `~/.fx/settings.json`, and asks
-for a Vercel AI Gateway key (`vck_…`) on the terminal.
+That installs `fx`, puts `fxs` on `~/.local/bin`, and asks for a
+Vercel AI Gateway key (`vck_…`). Hidden input, 30s timeout.
 
-Add Docker and build the sandbox image in the same step:
+Also build the sandbox image:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/setup-fx.sh \
-  | bash -s -- --host --with-docker --build-image
+  | bash -s -- --with-docker --build-image
 ```
 
-Or keep the file and run commands yourself:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/setup-fx.sh -o setup-fx.sh
-chmod +x setup-fx.sh
-./setup-fx.sh                            # install
-./setup-fx.sh --host --with-docker --build-image
-```
-
-## Use
-
-In the **same** terminal that ran `curl | bash`, load PATH + key first
-(the parent shell cannot be changed by a pipe):
+`curl | bash` cannot change the shell you are typing in. In **that**
+tab:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-set -a && . ~/.config/fx/env && set +a
 ```
 
-Or just open a new tab.
+Or open a new tab.
+
+## Use
 
 ```bash
 cd /path/to/one/project
-fx ask --no-save "Reply with: GLM52_OK"   # native (macOS has an OS sandbox)
-setup-fx run                               # container; needs Docker running
-setup-fx ask "what is 17*19?"
-run-fx                                     # same as setup-fx run
+
+fx ask --no-save "Reply with: GLM52_OK"   # native
+fxs run                                    # Docker sandbox
+fxs ask "what is 17*19?"
+fxs status
+fxs key                                    # paste / replace the key
 ```
 
-`fx` on PATH is a tiny wrapper that sources `~/.config/fx/env` before
-execing the real binary, so you do not need `export` after a re-install.
+On macOS, native `fx` already uses the OS sandbox (`sandbox=os`).
+Docker is optional and needs Docker Desktop **running**.
 
-On Linux, prefer `setup-fx run`. Native fx has **no OS sandbox** there.
-
-On macOS, `run-fx` needs **Docker Desktop open** (whale idle in the
-menu bar). If you only want native fx, skip Docker.
-
-## API key
-
-The installer prompts on the controlling TTY (so `curl | bash` still
-works). The key is hidden as you paste it.
-
-| | |
-| --- | --- |
-| Timeout | **30 seconds** — install continues if you skip or the session has no TTY |
-| Stored at | `~/.config/fx/env` (mode `0600`) |
-| Loaded by | `~/.bashrc`, `~/.zshrc`, `~/.zprofile`, `~/.profile` |
-| Not stored in | the Docker image, git, or settings.json |
-
-After install, open a new terminal. You should not need `export`.
-
-Skip the prompt with `--skip-key-prompt`, `--non-interactive`,
-`--in-container`, or `CI=true`. Change the wait with
-`--key-timeout SEC` (`0` = wait forever).
+On Linux, native fx has no OS sandbox — prefer `fxs run`.
 
 ## Commands
 
-| Command | What it does |
+| | |
 | --- | --- |
-| `setup-fx.sh` / `install` | Install fx + write the embedded kit |
-| `setup-fx.sh run [args]` | `docker run` against `$PWD` with the sandbox flags |
-| `setup-fx.sh ask [args]` | One-shot `fx ask` inside that container |
-| `setup-fx.sh build` | Build `fx-sandbox:latest` from the embedded Dockerfile |
-| `setup-fx.sh unpack [dir]` | Write Dockerfile, compose, configs out as normal files |
+| `fxs` / `fxs run` | Sandboxed fx against `$PWD` |
+| `fxs ask …` | One-shot `fx ask` in that container |
+| `fxs build` | Build `fx-sandbox:latest` |
+| `fxs status` | Binary, key, Docker, image, PATH |
+| `fxs key` | (Re)prompt for the gateway key |
+| `fxs unpack [dir]` | Write Dockerfile / compose out |
+| `fxs uninstall` | Remove the CLI and kit (`-y` to skip confirm) |
+| `fxs install` | Re-run the installer |
 
-Useful install flags: `--host`, `--in-container`, `--with-docker`,
-`--build-image`, `--doctor`, `--system`, `--install-dev-tools`,
-`--skip-packages`, `--skip-fx`, `--configure-only`.
+`setup-fx`, `setup-fx.sh`, `run-fx`, and `fx-sandbox` stay on PATH as
+aliases of `fxs` so older docs keep working.
 
-## What the sandbox actually enforces
+## API key
 
-`setup-fx.sh run` always:
+Stored at `~/.config/fx/env` (mode `0600`). Sourced by the `fx`
+wrapper and by `~/.zshrc` / `~/.bashrc` / `~/.profile`. Never written
+into the Docker image.
 
-- maps `--user $(id -u):$(id -g)` so files you create belong to you
-- uses a read-only image rootfs + tmpfs `/tmp` and `$HOME`
-- drops all capabilities and sets `no-new-privileges`
-- bind-mounts **only** the project → `/workspace`
-- injects the API key via `-e`, never `COPY`
+Skip the prompt with `--skip-key-prompt`, `--non-interactive`,
+`--in-container`, or `CI=true`. `--key-timeout SEC` changes the wait
+(`0` = forever).
 
-It **refuses** to start as root, to mount `/`, `$HOME`, `/Users`,
-`/System`, `/Library`, or a Docker socket, and to pass `--yolo`
-unless you also pass `--allow-yolo`.
+## Sandbox
+
+`fxs run` always uses `--user $(id -u):$(id -g)`, a read-only rootfs,
+tmpfs home, `--cap-drop ALL`, `no-new-privileges`, and a **single**
+bind-mount: the project → `/workspace`. The key goes in via `-e`.
+
+It refuses root, `/`, `$HOME`, `/Users`, `/System`, `/Library`, a
+Docker socket, and `--yolo` unless you pass `--allow-yolo`.
 
 It does **not** stop the model from reading or uploading that one
-mounted project, or from using secrets already sitting in it.
+mounted project.
 
 ## Platforms
 
-| | macOS host | Linux host | Image |
+| | macOS | Linux | Image |
 | --- | --- | --- | --- |
-| fx binary | `macos-x86_64` / `macos-aarch64` | `linux-x86_64` / `linux-aarch64` | always Linux |
+| fx binary | `macos-*` | `linux-*` | always Linux |
 | fx `os` sandbox | yes | no | no |
 | Isolation | native `os`, or Docker | **Docker** | the container |
 
-`--with-docker` on Debian/Ubuntu installs Docker Engine. On macOS it
-installs Docker Desktop via Homebrew (`brew install --cask docker`);
-open Docker.app once before `--build-image`.
+`--with-docker`: Debian/Ubuntu → Engine; macOS → Docker Desktop cask
+(`open -a Docker` once before `fxs build`).
 
-The image is Ubuntu 24.04. Docker Desktop on a Mac builds
-`linux/arm64` or `linux/amd64` on its own.
-
-Default model is `zai/glm-5.2` (not `-fast`).
+Default model: `zai/glm-5.2` (not `-fast`).
 
 ## Network
 
-After you have the script, it only talks to:
+1. `https://releases.fx.sh/…` — fx tarball + checksum  
+2. Docker Hub — `ubuntu:24.04`, if you build the image  
+3. `https://ai-gateway.vercel.sh` — model calls at run time  
 
-1. `https://releases.fx.sh/…` — fx tarball + `.sha256`
-2. Docker Hub — `ubuntu:24.04`, if you build the image
-3. `https://ai-gateway.vercel.sh` — at **run** time, for model calls
-
-Companion files are not fetched from GitHub.
+The installer is self-contained. It does not fetch companion files
+from GitHub except to persist a copy of itself onto disk after
+`curl | bash`.
 
 ## Uninstall
 
 ```bash
-rm -f ~/.local/bin/fx ~/.local/bin/run-fx ~/.local/bin/fx-sandbox
-rm -rf ~/.fx ~/.config/fx ~/.local/share/fx-sandbox
-docker image rm fx-sandbox:latest
-docker volume ls | awk '/fx-state/ {print $2}' | xargs -r docker volume rm
+fxs uninstall
+# or:
+rm -f ~/.local/bin/fx ~/.local/bin/fxs ~/.local/bin/fx-sandbox \
+      ~/.local/bin/setup-fx ~/.local/bin/setup-fx.sh ~/.local/bin/run-fx
+rm -rf ~/.local/share/fx-sandbox
 ```
 
-Rotate a `vck_` key that has ever been pasted into chat:
+`fxs uninstall` can also drop `~/.fx` and `~/.config/fx` (the key)
+if you confirm.
+
+Rotate a `vck_` key that has been pasted into chat:
 <https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys>

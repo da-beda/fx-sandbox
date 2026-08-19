@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# setup-fx.sh — self-contained.
+# setup-fx.sh — the fx-sandbox installer (stable curl name).
 #
-# This one file is the whole kit. It embeds the Dockerfile, entrypoint,
-# run-fx wrapper, compose file, and configs. Nothing else is fetched
-# from GitHub (only the fx binary + its sha256 from releases.fx.sh).
+# After install the commands you actually type are:
+#   fx      native agent (wrapper loads ~/.config/fx/env)
+#   fxs     this toolkit: run / ask / build / status / key / uninstall
 #
 #   curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/setup-fx.sh | bash
-#   curl -fsSL …/setup-fx.sh | bash -s -- --host --with-docker --build-image
-#   setup-fx.sh run                  # sandboxed fx (after install)
-#   setup-fx.sh ask "…"              # one-shot
-#   setup-fx.sh unpack [dir]         # write the embedded files out
+#   fxs run                  # container sandbox
+#   fxs ask "…"              # one-shot
+#   fxs status
 #
-# Linux (Debian/Ubuntu + others) and macOS (Intel / Apple Silicon).
-# Bash 3.2-safe. Never prints secrets.
+# Linux + macOS (Intel / Apple Silicon). Bash 3.2-safe. Never prints secrets.
 #
 set -euo pipefail
 IFS=$'\n\t'
@@ -20,9 +18,9 @@ IFS=$'\n\t'
 FX_CDN="${FX_CDN:-https://releases.fx.sh}"
 KIT_DIR_DEFAULT="${HOME}/.local/share/fx-sandbox"
 DEFAULT_MODEL="${FX_MODEL:-zai/glm-5.2}"
-LOG_PREFIX="[fx-setup]"
+LOG_PREFIX="[fxs]"
 
-CMD="install"           # install | unpack | build | run | ask
+CMD="install"           # install | unpack | build | run | ask | status | key | uninstall
 MODE=""                 # host | container | auto
 NONINTERACTIVE=0
 WITH_DOCKER=0
@@ -35,6 +33,7 @@ CONFIGURE_ONLY=0
 DOCTOR=0
 ASSUME_YES=0
 SKIP_KEY_PROMPT=0
+FORCE_KEY_PROMPT=0
 KEY_TIMEOUT="${KEY_TIMEOUT:-30}"
 IMAGE_NAME="${FX_IMAGE_NAME:-fx-sandbox:latest}"
 UNPACK_DIR=""
@@ -91,39 +90,39 @@ file_sha256() {
 
 usage() {
   cat <<'EOF'
-setup-fx.sh — self-contained fx installer + sandbox (macOS and Linux)
+fxs — install fx and run it in a locked-down sandbox (macOS + Linux)
 
-USAGE
+INSTALL
   curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/setup-fx.sh | bash
-  curl -fsSL …/setup-fx.sh | bash -s -- --host --with-docker --build-image
-  ./setup-fx.sh [command] [options]
+  curl -fsSL …/setup-fx.sh | bash -s -- --with-docker --build-image
 
 COMMANDS
-  install                Install fx + write the embedded kit (default)
-  unpack [dir]           Write Dockerfile / run-fx.sh / compose / configs
-  build                  docker build fx-sandbox:latest from the embedded kit
-  run  [fx-args…]        Locked-down `docker run` against $PWD
-  ask  [fx-args…]        One-shot: run -- fx ask …
+  install              Install fx + this toolkit (default for setup-fx.sh)
+  run  [fx-args…]      Sandboxed fx against $PWD (default for `fxs`)
+  ask  [fx-args…]      One-shot: run -- fx ask …
+  build                Build the fx-sandbox Docker image
+  status               What is installed, keyed, and running
+  key                  (Re)prompt for a Vercel AI Gateway key
+  unpack [dir]         Write Dockerfile / compose / configs to disk
+  uninstall            Remove fxs, the fx wrapper, and the kit
+  help                 This help
 
-INSTALL OPTIONS
+INSTALL FLAGS
   --host / --in-container
-  --non-interactive   -y / --yes
-  --system            --install-dev-tools
-  --with-docker       --build-image
-  --configure-only    --skip-packages    --skip-fx
-  --doctor            --image NAME
-  --skip-key-prompt   Do not ask for an AI Gateway key
-  --key-timeout SEC   Prompt timeout (default: 30). 0 waits forever.
-  -h, --help
+  --with-docker        --build-image       --doctor
+  --system             --install-dev-tools
+  --configure-only     --skip-packages     --skip-fx
+  --skip-key-prompt    --key-timeout SEC   (default 30; 0 = forever)
+  --non-interactive    -y / --yes
+  --image NAME         -h / --help
 
-During a host install the script asks for a Vercel AI Gateway key
-(vck_…) on the controlling TTY, with a 30-second timeout so CI /
-piped sessions cannot hang. The key is stored in ~/.config/fx/env
-(mode 0600) and sourced from your shell rc — no manual export needed.
-Never written into the Docker image.
+AFTER INSTALL
+  fx           native agent — wrapper loads ~/.config/fx/env
+  fxs          this command (also: fx-sandbox)
+  fxs status   check this machine
 
-This file embeds the Dockerfile, entrypoint, run wrapper, and configs.
-The only extra network call is the fx release tarball + its .sha256.
+The API key is stored in ~/.config/fx/env (0600), never in the image.
+Companion files are embedded; the only extra download is the fx tarball.
 EOF
 }
 
@@ -133,7 +132,7 @@ EOF
 parse_args() {
   if [[ $# -gt 0 ]]; then
     case "$1" in
-      install|unpack|build|run|ask|help)
+      install|unpack|build|run|ask|status|key|uninstall|doctor|help)
         CMD="$1"
         shift
         ;;
@@ -142,9 +141,9 @@ parse_args() {
         ;;
     esac
   fi
-  # invoked as the generated `run-fx` symlink
+  # `fxs` / `fx-sandbox` / `run-fx` default to the sandbox, not re-install.
   case "${0##*/}" in
-    run-fx|fx-sandbox)
+    fxs|fx-sandbox|run-fx)
       if [[ "$CMD" == "install" ]]; then CMD="run"; fi
       ;;
   esac
@@ -158,6 +157,22 @@ parse_args() {
 
   if [[ "$CMD" == "run" || "$CMD" == "ask" ]]; then
     RUN_ARGS=("$@")
+    return 0
+  fi
+
+  if [[ "$CMD" == "status" || "$CMD" == "key" || "$CMD" == "doctor" ]]; then
+    return 0
+  fi
+
+  if [[ "$CMD" == "uninstall" ]]; then
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -y|--yes) ASSUME_YES=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown argument: $1 (try --help)" ;;
+      esac
+      shift
+    done
     return 0
   fi
 
@@ -602,15 +617,12 @@ END_ENTRYPOINT
 emit_runfx() {
 cat <<'END_RUNFX'
 #!/usr/bin/env bash
-# run-fx.sh — launch the sandboxed fx container against ONE host directory.
+# Internal docker launcher. Prefer the public command:  fxs run
 #
-# The mounted directory is the only host path fx can write. The rest of
-# your machine (home, SSH keys, Docker socket, other repos) stays out.
-#
-#   ./run-fx.sh                         # interactive fx in $PWD
-#   ./run-fx.sh ask "what is 17*19?"    # one-shot
-#   ./run-fx.sh --workspace ~/src/app
-#   ./run-fx.sh --read-only-workspace ask "review this repo"
+#   fxs run                         # interactive fx in $PWD
+#   fxs ask "what is 17*19?"
+#   fxs run -w ~/src/app
+#   fxs run --read-only-workspace ask "review this repo"
 #
 # Required on the host:
 #   docker, the image built by setup-fx.sh --build-image (or `docker compose build`)
@@ -656,56 +668,36 @@ DRY=0
 
 usage() {
   cat <<'EOF'
-run-fx.sh — run fx inside a locked-down container
+fxs run — fx inside a locked-down container
 
 USAGE
-  ./run-fx.sh [wrapper-flags] [--] [fx-args...]
+  fxs run [flags] [--] [fx-args...]
+  fxs ask [fx-args...]
 
-WRAPPER FLAGS
+FLAGS
   -w, --workspace DIR    Host directory to mount at /workspace (default: $PWD)
-  --read-only-workspace  Mount the project read-only (review / Q&A only)
-  --env-file FILE        Extra env file (must be 0600; use for the API key)
+  --read-only-workspace  Mount the project read-only
+  --env-file FILE        Extra env file (must be 0600)
   --name NAME            Container name (default: ephemeral)
   --persist-state        Keep ~/.fx sessions in a named docker volume
-  --gitconfig            Mount $HOME/.gitconfig read-only (author identity)
-  --network NET          Docker network (default: bridge). Use `none` to deny egress.
-  --memory SIZE          e.g. 2g (default)
-  --cpus N               e.g. 2 (default)
-  --pids N               pids-limit (default: 256)
-  --image NAME           Override image (default: fx-sandbox:latest)
-  --pull                 docker pull/build reminder only; we do not pull secrets
-  --allow-yolo           Permit --yolo / FX_PERMISSION_MODE=yolo (off by default)
+  --gitconfig            Mount $HOME/.gitconfig read-only
+  --network NET          Default bridge. `none` denies egress.
+  --memory SIZE          default 2g
+  --cpus N               default 2
+  --pids N               default 256
+  --image NAME           default fx-sandbox:latest
+  --allow-yolo           Permit --yolo (off by default)
   --dry-run              Print the docker argv and exit
-  -h, --help             Show this help
+  -h, --help
 
-SAFETY DEFAULTS (always on)
-  * --user $(id -u):$(id -g)     files in the volume belong to you
-  * --cap-drop ALL
-  * --security-opt no-new-privileges
-  * --read-only                  image rootfs is immutable
-  * tmpfs /tmp and $HOME
-  * no /var/run/docker.sock
-  * refuses to mount /, $HOME, /etc, or a path that contains a docker socket
-  * refuses --privileged / --yolo unless you pass --allow-yolo
-
-EXAMPLES
-  export AI_GATEWAY_API_KEY='vck_…'
-  ./run-fx.sh                              # TTY session on the current repo
-  ./run-fx.sh ask --no-save "Summarise README.md"
-  ./run-fx.sh -w ~/src/myapp --persist-state
-  ./run-fx.sh --read-only-workspace ask "Find the SQL injection"
-
-DO NOT
-  * mount your home directory as the workspace
-  * pass -v /var/run/docker.sock
-  * run with --privileged
-  * bake the API key into the image
+Always on: --user $uid:$gid, --cap-drop ALL, no-new-privileges,
+read-only rootfs, tmpfs home, no docker.sock. Refuses /, $HOME, /Users.
 EOF
 }
 
-die()  { printf 'run-fx: error: %s\n' "$*" >&2; exit 1; }
-warn() { printf 'run-fx: warn: %s\n' "$*" >&2; }
-log()  { printf 'run-fx: %s\n' "$*" >&2; }
+die()  { printf 'fxs: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'fxs: warn: %s\n' "$*" >&2; }
+log()  { printf 'fxs: %s\n' "$*" >&2; }
 
 abs_path() {
   local target="$1"
@@ -799,21 +791,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v docker >/dev/null 2>&1 || {
-  printf 'run-fx: error: docker is not on PATH\n' >&2
+  printf 'fxs: error: docker is not on PATH\n' >&2
   printf '  macOS : brew install --cask docker && open -a Docker\n' >&2
-  printf '  Linux : ./setup-fx.sh --host --with-docker\n' >&2
-  printf '  native: on macOS, fx already uses the OS sandbox — no Docker needed:\n' >&2
-  printf '          fx ask --no-save "hi"\n' >&2
+  printf '  Linux : fxs install --with-docker\n' >&2
+  printf '  native: on macOS, skip Docker — fx already uses the OS sandbox\n' >&2
   exit 1
 }
 
 if ! docker info >/dev/null 2>&1; then
-  printf 'run-fx: error: Docker is installed but the daemon is not running\n' >&2
-  printf '  macOS : open -a Docker   # wait until the whale in the menu bar is idle\n' >&2
-  printf '          then: docker info && run-fx\n' >&2
+  printf 'fxs: error: Docker is installed but the daemon is not running\n' >&2
+  printf '  macOS : open -a Docker   # wait until the whale is idle\n' >&2
+  printf '          then: docker info && fxs run\n' >&2
   printf '  Linux : sudo systemctl start docker\n' >&2
-  printf '  native: on macOS you can skip Docker entirely:\n' >&2
-  printf '          fx ask --no-save "hi"\n' >&2
+  printf '  native: on macOS you can skip Docker:  fx ask --no-save "hi"\n' >&2
   exit 1
 fi
 
@@ -1127,12 +1117,11 @@ write_kit() {
   emit_dockerignore   | write_file "${dest}/.dockerignore"
   chmod 0755 "${dest}/entrypoint.sh" "${dest}/run-fx.sh"
   persist_self "$dest"
-  ok "kit written to ${dest}"
+  ok "kit ready"
   printf '%s\n' "$dest"
 }
 
-# Make sure the installer itself exists on disk (curl|bash has no $0 file)
-# and is linked onto PATH as setup-fx / setup-fx.sh.
+# Persist this installer as setup-fx.sh (stable name) and link `fxs` on PATH.
 persist_self() {
   local dest="$1"
   local src="${BASH_SOURCE[0]:-}"
@@ -1147,20 +1136,18 @@ persist_self() {
   chmod 0755 "${dest}/setup-fx.sh" 2>/dev/null || true
 }
 
-link_run_fx() {
+link_cli() {
   local dest here
   dest="$(install_dir_for_mode)"
   here="$1"
   mkdir -p "$dest"
-  if [[ -x "${here}/run-fx.sh" ]]; then
-    ln -sfn "${here}/run-fx.sh" "${dest}/run-fx"
-    ln -sfn "${here}/run-fx.sh" "${dest}/fx-sandbox"
-    ok "linked ${dest}/run-fx"
-  fi
   if [[ -x "${here}/setup-fx.sh" ]]; then
+    ln -sfn "${here}/setup-fx.sh" "${dest}/fxs"
+    ln -sfn "${here}/setup-fx.sh" "${dest}/fx-sandbox"
     ln -sfn "${here}/setup-fx.sh" "${dest}/setup-fx"
     ln -sfn "${here}/setup-fx.sh" "${dest}/setup-fx.sh"
-    ok "linked ${dest}/setup-fx"
+    ln -sfn "${here}/setup-fx.sh" "${dest}/run-fx"
+    ok "linked ${dest}/fxs"
   fi
 }
 
@@ -1303,30 +1290,33 @@ prompt_gateway_key() {
   if [[ "$MODE" == "container" ]]; then
     return 0
   fi
-  if [[ $SKIP_KEY_PROMPT -eq 1 || $NONINTERACTIVE -eq 1 ]]; then
-    log "skipping API key prompt (--skip-key-prompt / --non-interactive)"
-    return 0
-  fi
-  if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then
-    log "CI=true — skipping API key prompt"
-    return 0
-  fi
-
-  if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
-    log "AI_GATEWAY_API_KEY already set in the environment"
-    return 0
-  fi
-
-  if [[ -r "${HOME}/.config/fx/env" ]]; then
-    # shellcheck disable=SC1091
-    set -a
-    # shellcheck disable=SC1090
-    . "${HOME}/.config/fx/env"
-    set +a
-    if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
-      ok "using existing key in ${HOME}/.config/fx/env"
+  if [[ ${FORCE_KEY_PROMPT:-0} -eq 0 ]]; then
+    if [[ $SKIP_KEY_PROMPT -eq 1 || $NONINTERACTIVE -eq 1 ]]; then
+      log "skipping API key prompt"
       return 0
     fi
+    if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then
+      log "CI=true — skipping API key prompt"
+      return 0
+    fi
+    if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
+      log "AI_GATEWAY_API_KEY already set in the environment"
+      return 0
+    fi
+    if [[ -r "${HOME}/.config/fx/env" ]]; then
+      # shellcheck disable=SC1091
+      set -a
+      # shellcheck disable=SC1090
+      . "${HOME}/.config/fx/env"
+      set +a
+      if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
+        ok "using existing key in ${HOME}/.config/fx/env"
+        return 0
+      fi
+    fi
+  else
+    # fxs key: ignore a stale env var so the new paste wins.
+    unset AI_GATEWAY_API_KEY
   fi
 
   # /dev/tty can exist as a node and still be unopenable (no controlling
@@ -1337,9 +1327,8 @@ prompt_gateway_key() {
   fi
 
   printf '\n' >&2
-  printf '%s Vercel AI Gateway API key\n' "${LOG_PREFIX}" >&2
-  printf '%s Paste a vck_… key, then Enter. Leave empty to skip.\n' "${LOG_PREFIX}" >&2
-  printf '%s Timeout: %ss (install continues without a key).\n' "${LOG_PREFIX}" "${KEY_TIMEOUT}" >&2
+  printf '%s Vercel AI Gateway key (vck_…)\n' "${LOG_PREFIX}" >&2
+  printf '%s Hidden input · %ss timeout · Enter skips · later: fxs key\n' "${LOG_PREFIX}" "${KEY_TIMEOUT}" >&2
   printf '%s Key: ' "${LOG_PREFIX}" >&2
 
   local key="" status=0
@@ -1354,9 +1343,9 @@ prompt_gateway_key() {
 
   if [[ $status -ne 0 ]]; then
     if [[ $status -gt 128 ]]; then
-      warn "no key within ${KEY_TIMEOUT}s — continuing without one"
+      warn "no key within ${KEY_TIMEOUT}s — continuing without one (later: fxs key)"
     else
-      warn "key prompt skipped (EOF on TTY)"
+      warn "key prompt skipped (later: fxs key)"
     fi
     return 0
   fi
@@ -1367,7 +1356,7 @@ prompt_gateway_key() {
   key="${key%"${key##*[![:space:]]}"}"
 
   if [[ -z "$key" ]]; then
-    log "empty key — skipped (you can re-run or put it in ~/.config/fx/env)"
+    log "empty key — skipped (set one later with: fxs key)"
     return 0
   fi
   if [[ "$key" != vck_* ]]; then
@@ -1466,6 +1455,132 @@ run_doctor() {
   fi
 }
 
+cmd_status() {
+  if [[ -z "$MODE" ]]; then
+    if in_container; then MODE="container"; else MODE="host"; fi
+  fi
+  local dest bin key_state docker_state image_state path_state settings sandbox
+  dest="$(install_dir_for_mode)"
+  bin="${dest}/fx"
+  [[ -x "$bin" ]] || bin="$(command -v fx || true)"
+
+  if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
+    key_state="ok (environment)"
+  elif [[ -r "${HOME}/.config/fx/env" ]]; then
+    key_state="ok (~/.config/fx/env)"
+  else
+    key_state="missing — run: fxs key"
+  fi
+
+  if command -v docker >/dev/null 2>&1; then
+    if docker info >/dev/null 2>&1; then
+      docker_state="running"
+    else
+      docker_state="installed, daemon not running"
+    fi
+  else
+    docker_state="not installed"
+  fi
+
+  if command -v docker >/dev/null 2>&1 && docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+    image_state="present (${IMAGE_NAME})"
+  else
+    image_state="not built — fxs build"
+  fi
+
+  case ":${PATH}:" in
+    *":${dest}:"*) path_state="ok (${dest})" ;;
+    *) path_state="missing ${dest} — export PATH=\"${dest}:\$PATH\"" ;;
+  esac
+
+  sandbox="$(sandbox_for_this_os)"
+  settings="${HOME}/.fx/settings.json"
+  if [[ -r "$settings" ]]; then
+    local from_file
+    from_file="$(awk -F '"' '/"sandbox"/ {print $4; exit}' "$settings" 2>/dev/null || true)"
+    [[ -n "$from_file" ]] && sandbox="$from_file"
+  fi
+  [[ -n "$sandbox" ]] || sandbox="none"
+
+  cat >&2 <<EOF
+${LOG_PREFIX} status
+
+  os       ${UNAME_S}/${UNAME_M}
+  fx       $({ [[ -n "$bin" && -x "$bin" ]] && "$bin" --version; } 2>/dev/null || echo "not installed")
+  path     ${path_state}
+  key      ${key_state}
+  model    ${DEFAULT_MODEL}
+  sandbox  ${sandbox}   (fx native; Linux needs Docker)
+  docker   ${docker_state}
+  image    ${image_state}
+  kit      $(kit_dest)
+  cli      $(command -v fxs 2>/dev/null || echo "fxs not on PATH")
+
+  fx ask --no-save "Reply with: GLM52_OK"
+  fxs run
+EOF
+}
+
+cmd_key() {
+  if [[ -z "$MODE" ]]; then MODE="host"; fi
+  FORCE_KEY_PROMPT=1
+  SKIP_KEY_PROMPT=0
+  NONINTERACTIVE=0
+  prompt_gateway_key
+  maybe_store_key_hint
+  if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
+    ok "key saved — new shells and the fx wrapper will pick it up"
+  else
+    warn "no key stored"
+  fi
+}
+
+cmd_uninstall() {
+  local dest kit
+  dest="$(install_dir_for_mode)"
+  kit="$(kit_dest)"
+
+  cat >&2 <<EOF
+${LOG_PREFIX} uninstall will remove:
+  ${dest}/fx
+  ${dest}/fxs  ${dest}/fx-sandbox  ${dest}/setup-fx  ${dest}/setup-fx.sh  ${dest}/run-fx
+  ${kit}
+EOF
+
+  if [[ $ASSUME_YES -eq 0 ]]; then
+    if ! { : < /dev/tty; } 2>/dev/null; then
+      die "no TTY — re-run with: fxs uninstall -y"
+    fi
+    printf '%s continue? [y/N] (30s) ' "${LOG_PREFIX}" >&2
+    local ans="" status=0
+    IFS= read -r -t 30 ans < /dev/tty || status=$?
+    printf '\n' >&2
+    [[ $status -eq 0 && "$ans" =~ ^[Yy]$ ]] || die "aborted"
+  fi
+
+  rm -f "${dest}/fx" "${dest}/fxs" "${dest}/fx-sandbox" \
+        "${dest}/setup-fx" "${dest}/setup-fx.sh" "${dest}/run-fx"
+  rm -rf "${kit}"
+  ok "removed CLI and kit"
+
+  if [[ $ASSUME_YES -eq 1 ]]; then
+    return 0
+  fi
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    return 0
+  fi
+  printf '%s also delete ~/.fx and ~/.config/fx (API key)? [y/N] (30s) ' "${LOG_PREFIX}" >&2
+  local ans2="" st2=0
+  IFS= read -r -t 30 ans2 < /dev/tty || st2=$?
+  printf '\n' >&2
+  if [[ $st2 -eq 0 && "$ans2" =~ ^[Yy]$ ]]; then
+    rm -rf "${HOME}/.fx" "${HOME}/.config/fx"
+    ok "removed profile and key file"
+  else
+    log "left ~/.fx and ~/.config/fx in place"
+  fi
+}
+
 cmd_install() {
   if [[ -z "$MODE" ]]; then
     if in_container; then MODE="container"; else MODE="host"; fi
@@ -1486,7 +1601,7 @@ cmd_install() {
   local here=""
   if [[ "$MODE" == "host" ]]; then
     here="$(write_kit)"
-    link_run_fx "$here"
+    link_cli "$here"
   fi
 
   ensure_path_export
@@ -1505,32 +1620,28 @@ cmd_install() {
     run_doctor
   fi
 
-  local key_state="not set — re-run or write ~/.config/fx/env"
+  local key_state="missing — fxs key"
   if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
-    key_state="saved in ~/.config/fx/env (auto-loaded by your shell)"
+    key_state="saved in ~/.config/fx/env"
   fi
+  local ver
+  ver="$("$(install_dir_for_mode)/fx" --version 2>/dev/null || echo '?')"
 
   cat >&2 <<EOF
 
 ${C_GRN}${LOG_PREFIX} done.${C_OFF}
 
-  os     : ${UNAME_S}/${UNAME_M}
-  binary : $(install_dir_for_mode)/fx
-  model  : ${DEFAULT_MODEL}
-  kit    : ${here:-$(kit_dest)}
-  sandbox: $(sandbox_for_this_os)
-  key    : ${key_state}
+  ${UNAME_S}/${UNAME_M}   fx ${ver}
+  key     ${key_state}
+  kit     ${here:-$(kit_dest)}
 
-  # this terminal (curl|bash cannot change your parent shell)
-  set -a && . ~/.config/fx/env && set +a
-  export PATH="\$HOME/.local/bin:\$PATH"
+  This tab cannot inherit a piped install. Run:
+    export PATH="\$HOME/.local/bin:\$PATH"
 
-  # native — the fx wrapper loads the key itself after a re-install
-  fx ask --no-save "Reply with: GLM52_OK"
-
-  # container sandbox (needs Docker Desktop running on macOS)
-  setup-fx run
-  run-fx
+  fx ask --no-save "Reply with: GLM52_OK"    # native
+  fxs run                                    # Docker sandbox
+  fxs status                                 # check this machine
+  fxs key                                    # paste / replace the gateway key
 EOF
 }
 
@@ -1557,6 +1668,19 @@ main() {
       ;;
     run|ask)
       cmd_run
+      ;;
+    status)
+      cmd_status
+      ;;
+    doctor)
+      cmd_status
+      run_doctor
+      ;;
+    key)
+      cmd_key
+      ;;
+    uninstall)
+      cmd_uninstall
       ;;
     *) die "unknown command: $CMD" ;;
   esac
