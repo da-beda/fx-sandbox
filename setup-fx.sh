@@ -213,7 +213,7 @@ in_container() {
   if [[ -r /proc/1/cgroup ]] && grep -Eq 'docker|lxc|containerd|kubepods|libpod|podman' /proc/1/cgroup 2>/dev/null; then
     return 0
   fi
-  if tr '\0' '\n' < /proc/1/environ 2>/dev/null | grep -q '^container='; then
+  if cat /proc/1/environ 2>/dev/null | tr '\0' '\n' | grep -q '^container='; then
     return 0
   fi
   return 1
