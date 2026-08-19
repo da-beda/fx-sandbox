@@ -252,16 +252,11 @@ detect_platform() {
 }
 
 kit_dest() {
+  # Always the data dir. Never dirname($0): after install, `fxs` lives in
+  # ~/.local/bin and writing a Dockerfile there is how we trash PATH.
   if [[ -n "${FX_KIT_DIR:-}" ]]; then
     printf '%s\n' "$FX_KIT_DIR"
     return
-  fi
-  if ! is_piped; then
-    local src="${BASH_SOURCE[0]:-}"
-    if [[ -n "$src" && -f "$src" ]]; then
-      (cd "$(dirname "$src")" && pwd -P)
-      return
-    fi
   fi
   printf '%s\n' "$KIT_DIR_DEFAULT"
 }
@@ -451,22 +446,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/fx \
     PATH=/usr/local/bin:/usr/bin:/bin
 
-RUN groupadd --gid "${FX_GID}" fx \
- && useradd --uid "${FX_UID}" --gid "${FX_GID}" \
-      --create-home --home-dir /home/fx \
-      --shell /bin/bash \
-      --comment "fx sandbox user" fx \
- && mkdir -p /workspace /home/fx/.fx /home/fx/.config \
- && chown -R fx:fx /home/fx /workspace \
- && chmod 0700 /home/fx /home/fx/.fx
-
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \
+      passwd adduser \
       ca-certificates curl tar gzip git jq \
       python3 python3-pip python3-venv \
       ripgrep fd-find less file patch bash \
       build-essential pkg-config \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && if ! getent group fx >/dev/null; then \
+      groupadd --gid "${FX_GID}" fx 2>/dev/null || groupadd fx; \
+    fi \
+ && if ! id fx >/dev/null 2>&1; then \
+      useradd --uid "${FX_UID}" --gid fx \
+        --create-home --home-dir /home/fx \
+        --shell /bin/bash \
+        --comment "fx sandbox user" fx \
+      2>/dev/null || useradd --gid fx \
+        --create-home --home-dir /home/fx \
+        --shell /bin/bash \
+        --comment "fx sandbox user" fx; \
+    fi \
+ && mkdir -p /workspace /home/fx/.fx /home/fx/.config \
+ && chown -R fx:fx /home/fx /workspace \
+ && chmod 0700 /home/fx /home/fx/.fx
 
 # fx is a Linux binary inside the image (linux-x86_64 / linux-aarch64).
 RUN set -eu; \
@@ -1125,15 +1128,20 @@ write_kit() {
 persist_self() {
   local dest="$1"
   local src="${BASH_SOURCE[0]:-}"
-  if ! is_piped && [[ -n "$src" && -f "$src" && "$src" != "${dest}/setup-fx.sh" ]]; then
-    cp "$src" "${dest}/setup-fx.sh"
-  elif [[ ! -s "${dest}/setup-fx.sh" ]] || is_piped; then
+  local target="${dest}/setup-fx.sh"
+  if [[ -n "$src" && -f "$src" && -f "$target" && "$src" -ef "$target" ]]; then
+    chmod 0755 "$target" 2>/dev/null || true
+    return 0
+  fi
+  if ! is_piped && [[ -n "$src" && -f "$src" ]]; then
+    cp "$src" "$target"
+  elif [[ ! -s "$target" ]] || is_piped; then
     curl -fsSL --retry 2 --retry-delay 1 \
-      -o "${dest}/setup-fx.sh" \
+      -o "$target" \
       "https://raw.githubusercontent.com/da-beda/fx-sandbox/main/setup-fx.sh" \
       || warn "could not persist setup-fx.sh into ${dest}"
   fi
-  chmod 0755 "${dest}/setup-fx.sh" 2>/dev/null || true
+  chmod 0755 "$target" 2>/dev/null || true
 }
 
 link_cli() {

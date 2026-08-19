@@ -27,22 +27,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/fx \
     PATH=/usr/local/bin:/usr/bin:/bin
 
-RUN groupadd --gid "${FX_GID}" fx \
- && useradd --uid "${FX_UID}" --gid "${FX_GID}" \
-      --create-home --home-dir /home/fx \
-      --shell /bin/bash \
-      --comment "fx sandbox user" fx \
- && mkdir -p /workspace /home/fx/.fx /home/fx/.config \
- && chown -R fx:fx /home/fx /workspace \
- && chmod 0700 /home/fx /home/fx/.fx
-
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \
+      passwd adduser \
       ca-certificates curl tar gzip git jq \
       python3 python3-pip python3-venv \
       ripgrep fd-find less file patch bash \
       build-essential pkg-config \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && if ! getent group fx >/dev/null; then \
+      groupadd --gid "${FX_GID}" fx 2>/dev/null || groupadd fx; \
+    fi \
+ && if ! id fx >/dev/null 2>&1; then \
+      useradd --uid "${FX_UID}" --gid fx \
+        --create-home --home-dir /home/fx \
+        --shell /bin/bash \
+        --comment "fx sandbox user" fx \
+      2>/dev/null || useradd --gid fx \
+        --create-home --home-dir /home/fx \
+        --shell /bin/bash \
+        --comment "fx sandbox user" fx; \
+    fi \
+ && mkdir -p /workspace /home/fx/.fx /home/fx/.config \
+ && chown -R fx:fx /home/fx /workspace \
+ && chmod 0700 /home/fx /home/fx/.fx
 
 # fx is a Linux binary inside the image (linux-x86_64 / linux-aarch64).
 RUN set -eu; \
