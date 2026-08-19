@@ -82,10 +82,12 @@ if [[ -n "${AI_GATEWAY_API_KEY:-}" && ! "${AI_GATEWAY_API_KEY}" =~ ^vck_ ]]; the
   warn "AI_GATEWAY_API_KEY does not start with vck_ — is this the right secret?"
 fi
 
-# Default command is `fx`. If the user passed a wrapper-style argv
-# starting with `ask` / `doctor` / `status`, prefix fx.
+# Default command is `fx`. Prefix it for fx subcommands and for flags
+# like `--yolo` (`exec --yolo` is a bash error).
 if [[ $# -eq 0 ]]; then
   set -- fx
+elif [[ "$1" == -* ]]; then
+  set -- fx "$@"
 elif [[ "$1" != fx && "$1" != /usr/local/bin/fx && "$1" != bash && "$1" != sh ]]; then
   case "$1" in
     ask|doctor|status|models|permissions|credits|balance|usage|sessions|session|pr|issue|help)

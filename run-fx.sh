@@ -308,8 +308,20 @@ if [[ $GITCONFIG -eq 1 && -f "${HOME}/.gitconfig" ]]; then
 fi
 
 # If the caller passed nothing, drop into interactive fx.
+# Flags like --yolo are fx flags, not a command name.
 if [[ ${#FX_ARGS[@]} -eq 0 ]]; then
   FX_ARGS=(fx)
+elif [[ "${FX_ARGS[0]}" == -* ]]; then
+  FX_ARGS=(fx "${FX_ARGS[@]}")
+fi
+
+if [[ $ALLOW_YOLO -eq 1 ]]; then
+  for a in "${FX_ARGS[@]}"; do
+    if [[ "$a" == "--yolo" || "$a" == "yolo" ]]; then
+      DOCKER_ARGS+=(-e "FX_PERMISSION_MODE=yolo")
+      break
+    fi
+  done
 fi
 
 if [[ $ALLOW_YOLO -eq 0 ]]; then
