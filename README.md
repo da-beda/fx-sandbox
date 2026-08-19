@@ -43,7 +43,9 @@ Or open a new tab.
 cd /path/to/one/project
 
 fx ask --no-save "Reply with: GLM52_OK"   # native
-fxs run                                    # Docker sandbox
+fxs                                        # Docker sandbox, yolo
+fxs -c                                     # resume last fxs session
+fxs --no-yolo                              # prompt before tools
 fxs ask "what is 17*19?"
 fxs status
 fxs key                                    # paste / replace the key
@@ -58,7 +60,8 @@ On Linux, native fx has no OS sandbox — prefer `fxs run`.
 
 | | |
 | --- | --- |
-| `fxs` / `fxs run` | Sandboxed fx against `$PWD` |
+| `fxs` / `fxs run` | Sandboxed fx against `$PWD` (yolo by default) |
+| `fxs --no-yolo` | Same, but fx asks before tools |
 | `fxs run -c` | Resume last fxs session in this directory |
 | `fxs sessions` | List fxs sessions for `$PWD` |
 | `fxs ask …` | One-shot `fx ask` in that container |

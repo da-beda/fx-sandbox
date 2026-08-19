@@ -44,7 +44,7 @@ NETWORK="${FX_NETWORK:-bridge}"
 MEMORY="${FX_MEMORY:-2g}"
 CPUS="${FX_CPUS:-2}"
 PIDS="${FX_PIDS:-256}"
-ALLOW_YOLO=0
+ALLOW_YOLO="${FXS_YOLO:-1}"
 PULL=0
 DRY=0
 STATE_ROOT="${FXS_STATE_ROOT:-${HOME}/.local/share/fx-sandbox/state}"
@@ -70,22 +70,27 @@ FLAGS
   --cpus N               default 2
   --pids N               default 256
   --image NAME           default fx-sandbox:latest
-  --allow-yolo           Interactive yolo (sets FX_PERMISSION_MODE; no --yolo flag needed)
+  --allow-yolo           Yolo (default). Same as FXS_YOLO=1
+  --no-yolo              Ask before tools (fx auto/ask)
   --dry-run              Print the docker argv and exit
   -h, --help
 
 Always on: --user $uid:$gid, --cap-drop ALL, no-new-privileges,
 read-only rootfs, tmpfs home, no docker.sock. Refuses /, $HOME, /Users.
 
+Yolo is the default: the container is the sandbox, so fx does not
+prompt. Use --no-yolo if you want approval prompts.
+
 Sessions are stored per host project under
   ~/.local/share/fx-sandbox/state/<hash>/
 Host ~/.fx is never mounted. Resume only sees fxs sessions for this directory.
 
-  fxs run --allow-yolo                 # interactive, yolo via env
-  fxs run -c                           # resume last fxs session here
-  fxs run --resume last
-  fxs sessions                         # list (inside the box)
-  fxs run --allow-yolo -- ask --yolo "…"  # one-shot (ask accepts --yolo)
+  fxs                                  # interactive, yolo
+  fxs -c                               # resume last session here
+  fxs --no-yolo                        # prompt on tools
+  fxs ask "what is 17*19?"             # one-shot, yolo
+  fxs sessions                         # list
+
 EOF
 }
 
@@ -180,12 +185,11 @@ while [[ $# -gt 0 ]]; do
     --image) IMAGE="$2"; shift 2 ;;
     --pull) PULL=1; shift ;;
     --allow-yolo) ALLOW_YOLO=1; shift ;;
+    --no-yolo|--ask) ALLOW_YOLO=0; shift ;;
     --dry-run) DRY=1; shift ;;
     --) shift; FX_ARGS+=("$@"); break ;;
     --yolo)
-      if [[ $ALLOW_YOLO -eq 0 ]]; then
-        die "--yolo is blocked. rerun with --allow-yolo if you really want it (container-only safety net remains)."
-      fi
+      # Default is yolo; keep the token only if it is for `fx ask`.
       FX_ARGS+=("$1"); shift
       ;;
     -*)
@@ -348,34 +352,47 @@ elif [[ "${FX_ARGS[0]}" == -* ]]; then
 fi
 
 # Interactive `fx` has no --yolo flag (only `fx ask --yolo` does).
-# --allow-yolo turns the mode on via FX_PERMISSION_MODE and strips a
-# stray top-level --yolo so we do not get "unknown subcommand".
+# Default is yolo: set FX_PERMISSION_MODE, strip a stray top-level
+# --yolo, and inject --yolo after `ask` so one-shots do not stall.
 if [[ $ALLOW_YOLO -eq 1 ]]; then
   DOCKER_ARGS+=(-e "FX_PERMISSION_MODE=yolo")
   _kept=()
   _keep_yolo=0
+  _saw_ask=0
+  _have_ask_yolo=0
   for a in "${FX_ARGS[@]}"; do
     case "$a" in
-      ask) _keep_yolo=1; _kept+=("$a") ;;
+      ask) _keep_yolo=1; _saw_ask=1; _kept+=("$a") ;;
       --yolo|yolo)
         if [[ $_keep_yolo -eq 1 ]]; then
           _kept+=("$a")
+          _have_ask_yolo=1
         fi
         ;;
       *) _kept+=("$a") ;;
     esac
   done
+  if [[ $_saw_ask -eq 1 && $_have_ask_yolo -eq 0 ]]; then
+    _out=()
+    for a in "${_kept[@]}"; do
+      _out+=("$a")
+      if [[ "$a" == "ask" ]]; then
+        _out+=("--yolo")
+      fi
+    done
+    _kept=("${_out[@]}")
+  fi
   FX_ARGS=("${_kept[@]}")
   if [[ ${#FX_ARGS[@]} -eq 0 ]]; then
     FX_ARGS=(fx)
   fi
-  log "yolo on (FX_PERMISSION_MODE=yolo) — fx policy + os-sandbox off; container still applies"
+  log "yolo on — fx will not ask; isolation is the container"
 fi
 
 if [[ $ALLOW_YOLO -eq 0 ]]; then
   for a in "${FX_ARGS[@]}"; do
     if [[ "$a" == "--yolo" || "$a" == "yolo" ]]; then
-      die "--yolo blocked (pass --allow-yolo on the wrapper if you insist)"
+      die "--yolo blocked (omit --no-yolo, or drop --yolo)"
     fi
   done
 fi
