@@ -233,9 +233,16 @@ fi
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   if [[ -f "${SCRIPT_DIR}/Dockerfile" ]]; then
-    log "image ${IMAGE} missing — building it"
-    docker build --tag "$IMAGE" \
-      --build-arg "FX_MODEL=${FX_MODEL:-zai/glm-5.2}" \
+    log "image ${IMAGE} missing — building it (needs Ubuntu packages; first time can take a few minutes)"
+    BUILD_ARGS=(
+      --tag "$IMAGE"
+      --build-arg "FX_MODEL=${FX_MODEL:-zai/glm-5.2}"
+    )
+    if [[ -n "${FX_APT_MIRROR:-}" ]]; then
+      BUILD_ARGS+=(--build-arg "APT_MIRROR=${FX_APT_MIRROR}")
+      log "apt mirror: ${FX_APT_MIRROR}"
+    fi
+    docker build "${BUILD_ARGS[@]}" \
       -f "${SCRIPT_DIR}/Dockerfile" "$SCRIPT_DIR"
   else
     die "image ${IMAGE} not found and no Dockerfile next to this script"

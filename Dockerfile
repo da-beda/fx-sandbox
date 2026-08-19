@@ -10,6 +10,8 @@ ARG FX_MODEL=zai/glm-5.2
 ARG FX_UID=1000
 ARG FX_GID=1000
 ARG TARGETARCH
+# Optional apt mirror, e.g. http://de.ports.ubuntu.com/ubuntu-ports
+ARG APT_MIRROR=
 
 LABEL org.opencontainers.image.title="fx-sandbox" \
       org.opencontainers.image.description="Hardened Ubuntu image for Vercel Labs fx" \
@@ -27,18 +29,25 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/fx \
     PATH=/usr/local/bin:/usr/bin:/bin
 
-RUN apt-get update -y \
- && apt-get install -y --no-install-recommends \
-      passwd adduser \
-      ca-certificates curl tar gzip git jq \
-      python3 python3-pip python3-venv \
-      ripgrep fd-find less file patch bash \
-      build-essential pkg-config \
- && rm -rf /var/lib/apt/lists/* \
- && if ! getent group fx >/dev/null; then \
+# Slim package set (no compiler toolchain). Retries + optional mirror
+# because Docker Desktop on macOS often flakes on ports.ubuntu.com:80.
+RUN set -eu; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
+      > /etc/apt/apt.conf.d/80-retries; \
+    if [ -n "${APT_MIRROR}" ]; then \
+      if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i "s|http://ports.ubuntu.com/ubuntu-ports|${APT_MIRROR}|g; s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g" \
+          /etc/apt/sources.list.d/ubuntu.sources; \
+      fi; \
+    fi; \
+    apt-get update -y; \
+    apt-get install -y --no-install-recommends \
+      passwd ca-certificates curl tar gzip git bash; \
+    rm -rf /var/lib/apt/lists/*; \
+    if ! getent group fx >/dev/null; then \
       groupadd --gid "${FX_GID}" fx 2>/dev/null || groupadd fx; \
-    fi \
- && if ! id fx >/dev/null 2>&1; then \
+    fi; \
+    if ! id fx >/dev/null 2>&1; then \
       useradd --uid "${FX_UID}" --gid fx \
         --create-home --home-dir /home/fx \
         --shell /bin/bash \
@@ -47,10 +56,10 @@ RUN apt-get update -y \
         --create-home --home-dir /home/fx \
         --shell /bin/bash \
         --comment "fx sandbox user" fx; \
-    fi \
- && mkdir -p /workspace /home/fx/.fx /home/fx/.config \
- && chown -R fx:fx /home/fx /workspace \
- && chmod 0700 /home/fx /home/fx/.fx
+    fi; \
+    mkdir -p /workspace /home/fx/.fx /home/fx/.config; \
+    chown -R fx:fx /home/fx /workspace; \
+    chmod 0700 /home/fx /home/fx/.fx
 
 # fx is a Linux binary inside the image (linux-x86_64 / linux-aarch64).
 RUN set -eu; \
