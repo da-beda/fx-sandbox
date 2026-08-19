@@ -1157,6 +1157,34 @@ link_cli() {
     ln -sfn "${here}/setup-fx.sh" "${dest}/run-fx"
     ok "linked ${dest}/fxs"
   fi
+  scrub_path_pollution "$dest"
+}
+
+# An older bug unpacked the kit into ~/.local/bin. Remove only those
+# leaked names. Never touch fx / fxs / claude / uv / python*.
+scrub_path_pollution() {
+  local dest="${1:-$(install_dir_for_mode)}"
+  local f removed=0
+  # Only scrub the user bindir, never /usr/local/bin wholesale.
+  case "$dest" in
+    "${HOME}/.local/bin") ;;
+    *) return 0 ;;
+  esac
+  for f in Dockerfile entrypoint.sh docker-compose.yml run-fx.sh \
+           .env.example .dockerignore; do
+    if [[ -e "${dest}/${f}" || -L "${dest}/${f}" ]]; then
+      rm -f "${dest}/${f}"
+      removed=1
+    fi
+  done
+  if [[ -d "${dest}/config" ]]; then
+    rm -f "${dest}/config/settings.json" "${dest}/config/workspace.fx.json"
+    rmdir "${dest}/config" 2>/dev/null || true
+    removed=1
+  fi
+  if [[ $removed -eq 1 ]]; then
+    ok "removed leftover kit files from ${dest}"
+  fi
 }
 
 append_path_line() {
@@ -1437,6 +1465,7 @@ cmd_build() {
 }
 
 cmd_run() {
+  scrub_path_pollution
   local here
   here="$(write_kit)"
   if [[ ! -x "${here}/run-fx.sh" ]]; then
