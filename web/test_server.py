@@ -61,6 +61,19 @@ class RankModels(unittest.TestCase):
         self.assertEqual(ids[0], "grok-4")
         self.assertNotIn("zai/glm-5.2", ids)
 
+    def test_openrouter_free_first(self):
+        found = [
+            {"id": "openai/gpt-4o", "label": "gpt-4o"},
+            {"id": "stealth/ox-alpha", "label": "ox-alpha"},
+            {"id": "z-ai/glm-5.2:free", "label": "glm-5.2:free"},
+        ]
+        ranked = server.rank_models(found, "stealth/ox-alpha", prefer_free=True)
+        ids = [m["id"] for m in ranked]
+        self.assertEqual(ids[0], "stealth/ox-alpha")
+        self.assertEqual(ids[1], "z-ai/glm-5.2:free")
+        self.assertEqual(ids[-1], "openai/gpt-4o")
+        self.assertIn("(free)", ranked[0]["label"])
+
 
 class RecoverError(unittest.TestCase):
     def test_provider_unavailable(self):

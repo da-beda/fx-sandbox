@@ -72,7 +72,7 @@ DEFAULT_MODELS = {
     "vercel": VERCEL_DEFAULT_MODEL,
     "openai": "gpt-4o",
     "xai": "grok-4",
-    "openrouter": "openai/gpt-4o",
+    "openrouter": "stealth/ox-alpha",
     "groq": "llama-3.3-70b-versatile",
     "together": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
     "fireworks": "accounts/fireworks/models/llama-v3p1-70b-instruct",
@@ -86,6 +86,13 @@ LOCAL_PROVIDERS = {"ollama", "lmstudio"}
 # Hosts that prefer /v1/responses (reasoning + tool items). Others stay on
 # chat/completions unless the user sets FX_UPSTREAM_API=responses.
 RESPONSES_DEFAULT = {"openai", "xai"}
+# OpenRouter paid ids 403 on a free/exhausted key. Prefer these, then :free.
+OPENROUTER_FREE_HINTS = (
+    "stealth/ox-alpha",
+    "openrouter/free",
+    "z-ai/glm-5.2:free",
+    "openai/gpt-oss-20b:free",
+)
 _REASONING_EFFORT = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
@@ -269,6 +276,48 @@ def provider_needs_key(pid: str) -> bool:
     return pid not in ("vercel", "") and pid not in LOCAL_PROVIDERS
 
 
+def is_free_model(mid: str) -> bool:
+    m = (mid or "").strip().lower()
+    if not m:
+        return False
+    if m.endswith(":free") or m == "openrouter/free":
+        return True
+    return m.startswith("stealth/")
+
+
+def model_label(mid: str) -> str:
+    raw = (mid or "").strip()
+    if not raw:
+        return ""
+    name = raw.split("/")[-1]
+    if name.endswith(":free"):
+        return name[:-5] + " (free)"
+    if is_free_model(raw):
+        return name + " (free)"
+    return name
+
+
+def _openrouter_alias(current: str, ids: list[str]) -> str:
+    if not current:
+        return ""
+    if current in ids:
+        return current
+    tail = current.split("/")[-1]
+    for c in (
+        current + ":free",
+        "z-ai/" + tail,
+        "z-ai/" + tail + ":free",
+        "openai/" + tail,
+        "openai/" + tail + ":free",
+    ):
+        if c in ids:
+            return c
+    for i in ids:
+        if i.endswith("/" + tail) or i.endswith("/" + tail + ":free"):
+            return i
+    return ""
+
+
 def upstream_http_error(code: int, body: bytes) -> str:
     text = (body or b"").decode("utf-8", errors="replace")
     msg = ""
@@ -304,11 +353,23 @@ def suggest_model(pid: str, current: str = "", catalog: Optional[list[str]] = No
 
     Keep a non-default current id if the catalog (when given) lists it.
     Never leave fx's Vercel default pointed at xAI / OpenAI / Ollama.
+    OpenRouter prefers free ids — paid ones 403 on an exhausted key.
     """
     pid = pid or "vercel"
     current = (current or "").strip()
     ids = [i for i in (catalog or []) if i]
     if ids:
+        if pid == "openrouter":
+            alias = _openrouter_alias(current, ids)
+            if alias:
+                return alias
+            for hint in OPENROUTER_FREE_HINTS:
+                if hint in ids:
+                    return hint
+            for i in ids:
+                if is_free_model(i):
+                    return i
+            return ids[0]
         if current in ids:
             return current
         hint = DEFAULT_MODELS.get(pid) or ""

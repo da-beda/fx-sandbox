@@ -719,7 +719,7 @@ def parse_models(text: str) -> list[dict]:
     return out
 
 
-def rank_models(found: list[dict], current: str) -> list[dict]:
+def rank_models(found: list[dict], current: str, prefer_free: bool = False) -> list[dict]:
     by_id: dict[str, dict] = {}
     for m in found:
         mid = m["id"]
@@ -727,7 +727,8 @@ def rank_models(found: list[dict], current: str) -> list[dict]:
             continue
         by_id[mid] = m
     out: list[dict] = []
-    for pid in PREFERRED_MODELS:
+    preferred = [] if prefer_free else PREFERRED_MODELS
+    for pid in preferred:
         if pid in by_id:
             m = by_id.pop(pid)
             label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), m.get("label") or pid.split("/")[-1])
@@ -735,11 +736,18 @@ def rank_models(found: list[dict], current: str) -> list[dict]:
         elif pid == current:
             label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), pid.split("/")[-1])
             out.append({"id": pid, "label": label})
+    rest: list[dict] = []
     for m in found:
         if m["id"] in by_id:
-            out.append(by_id.pop(m["id"]))
+            rest.append(by_id.pop(m["id"]))
+    if prefer_free:
+        rest.sort(key=lambda m: (0 if gateway.is_free_model(m["id"]) else 1))
+        for m in rest:
+            if not m.get("label") or m["label"] == m["id"].split("/")[-1]:
+                m["label"] = gateway.model_label(m["id"])
+    out.extend(rest)
     if current and current not in {m["id"] for m in out}:
-        out.insert(0, {"id": current, "label": current.split("/")[-1]})
+        out.insert(0, {"id": current, "label": gateway.model_label(current) or current.split("/")[-1]})
     return out[:MAX_MODELS]
 
 
@@ -1003,7 +1011,7 @@ class Handler(BaseHTTPRequestHandler):
             if gateway.configured_upstream():
                 gateway.ensure_gateway()
                 ids = gateway.fetch_catalog()
-                models = [{"id": i, "label": i.split("/")[-1]} for i in ids]
+                models = [{"id": i, "label": gateway.model_label(i)} for i in ids]
             if not models:
                 ws = workspace_ok(ws)
                 r = run_fxs(ws, ["models", "--json"], timeout=60)
@@ -1015,9 +1023,13 @@ class Handler(BaseHTTPRequestHandler):
             models = []
         vercel = gateway.current_provider().get("vercel", True)
         fallback = list(CATALOG_MODELS) if vercel else (
-            [{"id": MODEL, "label": MODEL.split("/")[-1]}] if MODEL else []
+            [{"id": MODEL, "label": gateway.model_label(MODEL) or MODEL.split("/")[-1]}] if MODEL else []
         )
-        models = rank_models(models or fallback, MODEL)
+        models = rank_models(
+            models or fallback,
+            MODEL,
+            prefer_free=not vercel and gateway.current_provider().get("id") == "openrouter",
+        )
         if not models:
             models = fallback
         self._json(200, {"models": models, "current": MODEL})

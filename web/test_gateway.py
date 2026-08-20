@@ -270,6 +270,30 @@ class Provider(unittest.TestCase):
             gateway.suggest_model("xai", "grok-3", ["grok-3", "grok-4"]),
             "grok-3",
         )
+        ids = [
+            "openai/gpt-4o",
+            "stealth/ox-alpha",
+            "z-ai/glm-5.2:free",
+            "openrouter/free",
+        ]
+        self.assertEqual(
+            gateway.suggest_model("openrouter", "zai/glm-5.2", ids),
+            "z-ai/glm-5.2:free",
+        )
+        self.assertEqual(
+            gateway.suggest_model("openrouter", "", ids),
+            "stealth/ox-alpha",
+        )
+        self.assertEqual(
+            gateway.suggest_model("openrouter", "stealth/ox-alpha", ids),
+            "stealth/ox-alpha",
+        )
+        self.assertTrue(gateway.is_free_model("stealth/ox-alpha"))
+        self.assertTrue(gateway.is_free_model("openrouter/free"))
+        self.assertTrue(gateway.is_free_model("z-ai/glm-5.2:free"))
+        self.assertFalse(gateway.is_free_model("openai/gpt-4o"))
+        self.assertEqual(gateway.model_label("stealth/ox-alpha"), "ox-alpha (free)")
+        self.assertEqual(gateway.model_label("z-ai/glm-5.2:free"), "glm-5.2 (free)")
 
     def test_needs_key(self):
         self.assertTrue(gateway.provider_needs_key("xai"))
@@ -626,7 +650,7 @@ class IsolatedApply(unittest.TestCase):
         out = gateway.apply_provider("openrouter")
         self.assertEqual(out["id"], "openrouter")
         self.assertEqual(out["url"], "https://openrouter.ai/api/v1")
-        self.assertEqual(out["model"], "openai/gpt-4o")
+        self.assertEqual(out["model"], "stealth/ox-alpha")
         self.assertTrue(out["needs_key"])
         self.assertEqual(out["api"], "auto")
         self.assertEqual(out["effective_api"], "chat")
