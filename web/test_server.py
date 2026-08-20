@@ -2,8 +2,11 @@
 """Unit tests for fxs ui helpers. Stdlib only."""
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -86,6 +89,57 @@ class Perm(unittest.TestCase):
     def test_clean(self):
         self.assertEqual(server.clean_perm("ask"), "ask")
         self.assertEqual(server.clean_perm("nope"), "yolo")
+
+
+class Sessions(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.prev = server.STATE_ROOT
+        server.STATE_ROOT = self.tmp
+        self.ws = "/tmp/fxs-test-ws"
+
+    def tearDown(self):
+        server.STATE_ROOT = self.prev
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, sid, payload):
+        d = server.session_root(self.ws)
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{sid}.json"
+        p.write_text(json.dumps(payload), encoding="utf-8")
+        return p
+
+    def test_read_roundtrip(self):
+        self._write("abc-1", {
+            "title": "Hello",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [{"text": "yo"}]},
+            ],
+        })
+        data = server.read_session(self.ws, "abc-1")
+        self.assertEqual(data["id"], "abc-1")
+        self.assertEqual(data["title"], "Hello")
+        self.assertEqual([m["content"] for m in data["messages"]], ["hi", "yo"])
+
+    def test_rejects_bad_id(self):
+        self._write("ok", {"title": "x", "messages": []})
+        self.assertIsNone(server.session_path(self.ws, "../ok"))
+        self.assertIsNone(server.session_path(self.ws, "ok/../ok"))
+        self.assertIsNone(server.session_path(self.ws, ""))
+        self.assertIsNone(server.read_session(self.ws, "missing"))
+
+    def test_delete(self):
+        self._write("gone", {"title": "x", "messages": [{"role": "user", "content": "bye"}]})
+        self.assertTrue(server.delete_session(self.ws, "gone"))
+        self.assertIsNone(server.read_session(self.ws, "gone"))
+        self.assertFalse(server.delete_session(self.ws, "gone"))
+
+    def test_list(self):
+        self._write("a", {"title": "One", "messages": [{"role": "user", "content": "x"}]})
+        rows = server.list_sessions(self.ws)
+        self.assertEqual(rows[0]["id"], "a")
+        self.assertEqual(rows[0]["title"], "One")
 
 
 class ReleaseCopy(unittest.TestCase):
