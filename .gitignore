@@ -5,3 +5,4 @@
 *.pem
 .DS_Store
 .fx-home/
+web/__pycache__/

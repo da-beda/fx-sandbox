@@ -106,6 +106,7 @@ COMMANDS
   key                  (Re)prompt for a Vercel AI Gateway key
   unpack [dir]         Write Dockerfile / compose / configs to disk
   uninstall            Remove fxs, the fx wrapper, and the kit
+  ui                   Open the optional local web UI
   help                 This help
 
 INSTALL FLAGS
@@ -135,7 +136,7 @@ EOF
 parse_args() {
   if [[ $# -gt 0 ]]; then
     case "$1" in
-      install|unpack|build|run|ask|status|key|uninstall|doctor|help)
+      install|unpack|build|run|ask|status|key|uninstall|doctor|help|ui)
         CMD="$1"
         shift
         ;;
@@ -169,6 +170,11 @@ parse_args() {
   fi
 
   if [[ "$CMD" == "status" || "$CMD" == "key" || "$CMD" == "doctor" ]]; then
+    return 0
+  fi
+
+  if [[ "$CMD" == "ui" ]]; then
+    RUN_ARGS=("$@")
     return 0
   fi
 
@@ -1223,6 +1229,11 @@ write_kit() {
   emit_dockerignore   | write_file "${dest}/.dockerignore"
   chmod 0755 "${dest}/entrypoint.sh" "${dest}/run-fx.sh"
   persist_self "$dest"
+  if [[ -d "${BASH_SOURCE[0]%/*}/web" ]]; then
+    mkdir -p "${dest}/web"
+    cp "${BASH_SOURCE[0]%/*}/web/"* "${dest}/web/" 2>/dev/null || true
+    chmod 0755 "${dest}/web/server.py" 2>/dev/null || true
+  fi
   ok "kit ready"
   printf '%s\n' "$dest"
 }
@@ -1682,6 +1693,52 @@ cmd_key() {
   fi
 }
 
+ensure_web_ui() {
+  local dest="$1"
+  local base="${FX_UI_BASE:-https://raw.githubusercontent.com/da-beda/fx-sandbox/main/web}"
+  mkdir -p "${dest}/web"
+  local f
+  for f in index.html app.css app.js server.py; do
+    if [[ -s "${dest}/web/${f}" ]]; then
+      continue
+    fi
+    if [[ -s "$(kit_dest)/web/${f}" && "$(kit_dest)" != "$dest" ]]; then
+      cp "$(kit_dest)/web/${f}" "${dest}/web/${f}"
+      continue
+    fi
+    log "fetch ${f}"
+    curl -fsSL --retry 2 --retry-delay 1 -o "${dest}/web/${f}" "${base}/${f}" \
+      || die "could not fetch web/${f} — clone da-beda/fx-sandbox or unpack from git"
+  done
+  chmod 0755 "${dest}/web/server.py"
+}
+
+cmd_ui() {
+  need_cmd python3
+  local here host port
+  here="$(kit_dest)"
+  # Prefer the kit next to a git checkout of this file.
+  if [[ -f "${BASH_SOURCE[0]%/*}/web/server.py" ]]; then
+    here="$(cd "${BASH_SOURCE[0]%/*}" && pwd -P)"
+  fi
+  ensure_web_ui "$here"
+  host="127.0.0.1"
+  port="8787"
+  local i=0
+  local args=("${RUN_ARGS[@]+"${RUN_ARGS[@]}"}")
+  while [[ $i -lt ${#args[@]} ]]; do
+    case "${args[$i]}" in
+      --host|-H) host="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+      --port|-p) port="${args[$((i+1))]}"; i=$((i+2)); continue ;;
+      --demo) export FXS_UI_DEMO=1; i=$((i+1)); continue ;;
+      --bind-all) host="0.0.0.0"; i=$((i+1)); continue ;;
+    esac
+    i=$((i+1))
+  done
+  log "ui http://${host}:${port}"
+  exec python3 "${here}/web/server.py" --host "$host" --port "$port"
+}
+
 cmd_uninstall() {
   local dest kit state
   dest="$(install_dir_for_mode)"
@@ -1788,6 +1845,7 @@ ${C_GRN}${LOG_PREFIX} done.${C_OFF}
 
   fx ask --no-save "Reply with: GLM52_OK"    # native
   fxs                                        # Docker sandbox, yolo
+  fxs ui                                     # optional local GUI
   fxs -c                                     # resume last fxs session
   fxs status                                 # check this machine
   fxs key                                    # paste / replace the gateway key
@@ -1827,6 +1885,9 @@ main() {
       ;;
     key)
       cmd_key
+      ;;
+    ui)
+      cmd_ui
       ;;
     uninstall)
       cmd_uninstall
