@@ -459,6 +459,7 @@
       applyWrap();
       if (!state.tree.length) loadTree();
       else renderTree();
+      findSync();
     } else {
       showEditor(false);
       if (!thread.querySelector(".msg.user, .msg.assistant")) closeChrome();
@@ -467,6 +468,31 @@
 
   function toggleFiles() {
     showFiles(!state.filesOn);
+  }
+
+  function findOpen() {
+    $("explorer").classList.add("finding");
+    $("tree-find").setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => {
+      treeQ.focus();
+      treeQ.select();
+    });
+  }
+
+  function findClose() {
+    if ((treeQ.value || "").trim()) return;
+    $("explorer").classList.remove("finding");
+    $("tree-find").setAttribute("aria-expanded", "false");
+  }
+
+  function findSync() {
+    if ((treeQ.value || "").trim()) {
+      $("explorer").classList.add("finding");
+      $("tree-find").setAttribute("aria-expanded", "true");
+    } else {
+      $("explorer").classList.remove("finding");
+      $("tree-find").setAttribute("aria-expanded", "false");
+    }
   }
 
   function showEditor(on) {
@@ -685,7 +711,8 @@
     state.orig = "";
     state.kind = "";
     showEditor(false);
-    treeQ.focus();
+    const sel = treeEl.querySelector(".tree-item.on") || treeEl.querySelector(".tree-item");
+    if (sel) sel.focus();
   }
 
   async function saveFile() {
@@ -1495,6 +1522,16 @@
       if (settings.open) { settings.close(); return; }
       if (pal.open) { hidePalette(); return; }
       if (state.editing) { closeEditor(); return; }
+      if ($("explorer").classList.contains("finding")) {
+        if (treeQ.value) {
+          treeQ.value = "";
+          renderTree();
+        } else {
+          findClose();
+          treeQ.blur();
+        }
+        return;
+      }
       if (state.filesOn) { showFiles(false); return; }
       if (state.busy) stop();
       return;
@@ -1526,9 +1563,7 @@
     }
     if (mod && e.key.toLowerCase() === "p") {
       e.preventDefault();
-      showFiles(true);
-      treeQ.focus();
-      treeQ.select();
+      showFiles(true).then(() => findOpen());
     }
     if (!mod && state.filesOn && !state.editing && document.activeElement !== promptEl &&
         document.activeElement !== treeQ && document.activeElement !== folderInput &&
@@ -1641,10 +1676,18 @@
       syncDirty();
     }
   });
+  $("tree-find").addEventListener("click", findOpen);
   treeQ.addEventListener("input", renderTree);
+  treeQ.addEventListener("focus", () => {
+    $("explorer").classList.add("finding");
+    $("tree-find").setAttribute("aria-expanded", "true");
+  });
+  treeQ.addEventListener("blur", () => { setTimeout(findClose, 0); });
   treeQ.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (treeQ.value) { treeQ.value = ""; renderTree(); e.stopPropagation(); }
+      e.stopPropagation();
+      if (treeQ.value) { treeQ.value = ""; renderTree(); }
+      else { findClose(); treeQ.blur(); }
     }
   });
   folderInput.addEventListener("change", commitFolder);
