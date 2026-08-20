@@ -44,6 +44,7 @@
     delete: ["file", "files"], tool: ["tool", "tools"],
   };
   const IMG_EXT = /\.(png|jpe?g|webp|gif)$/i;
+  const MD_EXT = /\.(md|markdown|mdown|mdx)$/i;
 
   const state = {
     workspace: localStorage.getItem("fxs.workspace") || "",
@@ -64,8 +65,10 @@
     openPath: "",
     orig: "",
     wrap: localStorage.getItem("fxs.wrap") !== "0",
+    mdPreview: localStorage.getItem("fxs.mdPreview") !== "0",
     filesW: clampW(parseInt(localStorage.getItem("fxs.filesW") || "340", 10)),
     editing: false,
+    kind: "",
   };
   if (localStorage.getItem("fxs.yolo") === "0" && !localStorage.getItem("fxs.perm")) {
     state.perm = "auto";
@@ -160,6 +163,239 @@
   };
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ENT[c]);
+  }
+
+  function isMd(path) {
+    return MD_EXT.test(path || "");
+  }
+
+  function mdUrl(url, img) {
+    url = String(url || "").trim();
+    if (/^(https?:|data:|mailto:)/i.test(url)) return url;
+    const path = url.replace(/^\.\//, "").split("#")[0].split("?")[0];
+    if (img && state.workspace && path) {
+      return "/api/file?raw=1&workspace=" + encodeURIComponent(state.workspace) +
+        "&path=" + encodeURIComponent(path);
+    }
+    return url;
+  }
+
+  function mdLink(url, inner, title) {
+    url = String(url || "").trim();
+    const t = title ? ' title="' + esc(title) + '"' : "";
+    if (/^(https?:|mailto:)/i.test(url)) {
+      return '<a href="' + esc(url) + '" target="_blank" rel="noopener"' + t + ">" + inner + "</a>";
+    }
+    if (url.startsWith("#")) return '<a href="' + esc(url) + '"' + t + ">" + inner + "</a>";
+    const path = url.replace(/^\.\//, "").split("#")[0].split("?")[0];
+    return '<a href="#"' + t + ' data-path="' + esc(path) + '">' + inner + "</a>";
+  }
+
+  function mdInline(s) {
+    const stash = [];
+    const hold = (html) => {
+      stash.push(html);
+      return "\0" + (stash.length - 1) + "\0";
+    };
+    s = String(s || "");
+    s = s.replace(/!\[([^\]]*)\]\((?:<)?([^)\s>]+)(?:>)?(?:\s+"([^"]*)")?\)/g,
+      (_, alt, url, title) => hold('<img src="' + esc(mdUrl(url, true)) + '" alt="' + esc(alt) + '"' +
+        (title ? ' title="' + esc(title) + '"' : "") + ">"));
+    s = s.replace(/\[([^\]]+)\]\((?:<)?([^)\s>]+)(?:>)?(?:\s+"([^"]*)")?\)/g,
+      (_, text, url, title) => hold(mdLink(url, mdInline(text), title)));
+    s = s.replace(/<(https?:\/\/[^>\s]+)>/g, (_, url) => hold(mdLink(url, esc(url))));
+    s = s.replace(/`([^`]+)`/g, (_, code) => hold("<code>" + esc(code) + "</code>"));
+    s = esc(s);
+    s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^\w*])\*([^*\n]+)\*([^\w*]|$)/g, "$1<em>$2</em>$3");
+    s = s.replace(/(^|[^\w_])_([^_\n]+)_([^\w_]|$)/g, "$1<em>$2</em>$3");
+    s = s.replace(/\0(\d+)\0/g, (_, n) => stash[+n] || "");
+    return s;
+  }
+
+  function mdToHtml(src) {
+    src = String(src ?? "").replace(/\r\n?/g, "\n").replace(/\t/g, "    ");
+    if (!src.trim()) return "";
+    const held = [];
+    const hold = (html) => {
+      held.push(html);
+      return "\n\n%%" + (held.length - 1) + "%%\n\n";
+    };
+    src = src.replace(/^ {0,3}(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)^ {0,3}\1[ \t]*$/gm,
+      (_, _t, info, body) => {
+        const lang = (info || "").trim().split(/\s+/)[0];
+        return hold("<pre><code" + (lang ? ' class="lang-' + esc(lang) + '"' : "") + ">" +
+          esc(body.replace(/\n$/, "")) + "</code></pre>");
+      });
+    const lines = src.split("\n");
+    const out = [];
+    let i = 0;
+    const LI = /^( *)([-*+]|\d+[.)])(?: +\[([ xX])\])? +(.*)$/;
+    const SEP = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+    const TROW = /^\s*\|.*\|\s*$/;
+    const HR = /^ {0,3}([-*_])(?: *\1){2,} *$/;
+    const ATX = /^ {0,3}(#{1,6}) +(.+?)(?: +#*)? *$/;
+    const restore = (s) => s.replace(/%%(\d+)%%/g, (_, n) => held[+n] || "");
+
+    function peek(n) { return lines[i + n] || ""; }
+    function blank(line) { return !String(line || "").trim(); }
+
+    function takeQuote() {
+      const inner = [];
+      while (i < lines.length && /^ {0,3}>/.test(lines[i])) {
+        inner.push(lines[i].replace(/^ {0,3}> ?/, ""));
+        i++;
+      }
+      return "<blockquote>" + mdToHtml(inner.join("\n")) + "</blockquote>";
+    }
+
+    function takeTable() {
+      const header = lines[i].trim().replace(/^\|/, "").replace(/\|$/, "");
+      const alignLine = peek(1);
+      const aligns = alignLine.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => {
+        const t = c.trim();
+        if (t.startsWith(":") && t.endsWith(":")) return "center";
+        if (t.endsWith(":")) return "right";
+        return "left";
+      });
+      i += 2;
+      const rows = [];
+      while (i < lines.length && TROW.test(lines[i]) && !SEP.test(lines[i])) {
+        rows.push(lines[i].trim().replace(/^\|/, "").replace(/\|$/, ""));
+        i++;
+      }
+      const split = (row) => row.split("|").map((c) => c.trim());
+      const cells = (row, tag) => split(row).map((c, n) => {
+        const a = aligns[n] && aligns[n] !== "left" ? ' style="text-align:' + aligns[n] + '"' : "";
+        return "<" + tag + a + ">" + mdInline(c) + "</" + tag + ">";
+      }).join("");
+      let html = "<table><thead><tr>" + cells(header, "th") + "</tr></thead>";
+      if (rows.length) {
+        html += "<tbody>" + rows.map((r) => "<tr>" + cells(r, "td") + "</tr>").join("") + "</tbody>";
+      }
+      return html + "</table>";
+    }
+
+    function takeList() {
+      const first = LI.exec(lines[i]);
+      const base = first[1].length;
+      const ordered = /\d/.test(first[2]);
+      const items = [];
+      while (i < lines.length) {
+        const m = LI.exec(lines[i]);
+        if (!m || m[1].length !== base || /\d/.test(m[2]) !== ordered) {
+          if (blank(lines[i]) && i + 1 < lines.length && LI.test(lines[i + 1]) &&
+              LI.exec(lines[i + 1])[1].length >= base) {
+            i++;
+            continue;
+          }
+          break;
+        }
+        const item = { check: m[3], chunks: [m[4]] };
+        i++;
+        while (i < lines.length) {
+          if (blank(lines[i])) {
+            if (i + 1 < lines.length && (LI.test(lines[i + 1]) ||
+                lines[i + 1].startsWith(" ".repeat(base + 2)))) {
+              item.chunks.push("");
+              i++;
+              continue;
+            }
+            break;
+          }
+          const n = LI.exec(lines[i]);
+          if (n) {
+            if (n[1].length > base) { item.chunks.push(lines[i]); i++; continue; }
+            break;
+          }
+          if (lines[i].startsWith(" ".repeat(base + 1))) {
+            item.chunks.push(lines[i].slice(Math.min(lines[i].length, base + 2)));
+            i++;
+            continue;
+          }
+          break;
+        }
+        items.push(item);
+      }
+      const tag = ordered ? "ol" : "ul";
+      const body = items.map((it) => {
+        const inner = mdToHtml(it.chunks.join("\n")).replace(/^<p>([\s\S]*)<\/p>$/, "$1");
+        if (it.check != null) {
+          const ck = /x/i.test(it.check) ? " checked" : "";
+          return '<li class="task"><input type="checkbox" disabled' + ck + ">" + inner + "</li>";
+        }
+        return "<li>" + inner + "</li>";
+      }).join("");
+      return "<" + tag + ">" + body + "</" + tag + ">";
+    }
+
+    while (i < lines.length) {
+      const line = lines[i];
+      if (blank(line)) { i++; continue; }
+      const token = line.trim();
+      if (/^%%\d+%%$/.test(token)) { out.push(token); i++; continue; }
+      const atx = ATX.exec(line);
+      if (atx) {
+        const lv = atx[1].length;
+        out.push("<h" + lv + ">" + mdInline(atx[2]) + "</h" + lv + ">");
+        i++;
+        continue;
+      }
+      if (HR.test(line) && !TROW.test(line)) { out.push("<hr>"); i++; continue; }
+      if (TROW.test(line) && SEP.test(peek(1))) { out.push(takeTable()); continue; }
+      if (/^ {0,3}>/.test(line)) { out.push(takeQuote()); continue; }
+      if (LI.test(line)) { out.push(takeList()); continue; }
+      if (/^ {0,3}=+$/.test(peek(1)) && line.trim()) {
+        out.push("<h1>" + mdInline(line.trim()) + "</h1>");
+        i += 2;
+        continue;
+      }
+      if (/^ {0,3}-+$/.test(peek(1)) && line.trim() && !TROW.test(line)) {
+        out.push("<h2>" + mdInline(line.trim()) + "</h2>");
+        i += 2;
+        continue;
+      }
+      const buf = [line];
+      i++;
+      while (i < lines.length && !blank(lines[i]) && !ATX.test(lines[i]) &&
+             !HR.test(lines[i]) && !LI.test(lines[i]) && !/^ {0,3}>/.test(lines[i]) &&
+             !/^%%\d+%%$/.test(lines[i].trim()) &&
+             !(TROW.test(lines[i]) && SEP.test(peek(1)))) {
+        if (/^ {0,3}(=+|-+)$/.test(lines[i])) break;
+        buf.push(lines[i]);
+        i++;
+      }
+      out.push("<p>" + mdInline(buf.join(" ").replace(/ +/g, " ").trim()) + "</p>");
+    }
+    return restore(out.join(""));
+  }
+
+  function applyMdView() {
+    const md = isMd(state.openPath) && state.kind === "text";
+    const preview = md && state.mdPreview;
+    const btn = $("ed-md");
+    btn.hidden = !md;
+    btn.classList.toggle("on", preview);
+    btn.setAttribute("aria-label", preview ? "Source" : "Preview");
+    btn.title = preview ? "Source" : "Preview";
+    $("ed-wrap").hidden = preview || state.kind !== "text";
+    if (preview) {
+      $("ed-md-view").innerHTML = mdToHtml(edBody.value);
+      $("ed-md-view").hidden = false;
+      $("ed-img").hidden = true;
+      $("ed-preview").classList.add("has-md");
+      $("ed-preview").hidden = false;
+      $("ed-code").hidden = true;
+      $("ed-loc").textContent = "Markdown";
+    } else {
+      $("ed-md-view").hidden = true;
+      $("ed-md-view").innerHTML = "";
+      $("ed-preview").classList.remove("has-md");
+      if (state.kind !== "image") $("ed-preview").hidden = true;
+    }
+    localStorage.setItem("fxs.mdPreview", state.mdPreview ? "1" : "0");
   }
 
   function fuzzy(query, text) {
@@ -380,16 +616,23 @@
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "failed");
       state.openPath = path;
+      state.kind = data.kind || "";
       $("ed-name").textContent = data.name || basename(path);
       $("ed-name").title = path;
       $("ed-meta").textContent = prettySize(data.size);
       $("ed-preview").hidden = true;
+      $("ed-preview").classList.remove("has-md");
+      $("ed-md-view").hidden = true;
+      $("ed-md-view").innerHTML = "";
+      $("ed-img").hidden = false;
       $("ed-note").hidden = true;
       $("ed-code").hidden = true;
       edBody.value = "";
       state.orig = "";
       $("ed-save").hidden = true;
       $("ed-dot").hidden = true;
+      $("ed-md").hidden = true;
+      $("ed-wrap").hidden = true;
       if (data.kind === "image") {
         $("ed-img").src = data.src;
         $("ed-img").alt = path;
@@ -399,7 +642,9 @@
         edBody.value = data.text || "";
         state.orig = edBody.value;
         $("ed-code").hidden = false;
+        $("ed-wrap").hidden = false;
         updateGutter();
+        applyMdView();
       } else {
         $("ed-note").hidden = false;
         $("ed-note").textContent = "This file can’t be edited here.";
@@ -407,7 +652,7 @@
       }
       showEditor(true);
       reveal(path);
-      if (data.kind === "text") {
+      if (data.kind === "text" && !(isMd(path) && state.mdPreview)) {
         const pin = () => {
           edBody.focus({ preventScroll: true });
           edBody.setSelectionRange(0, 0);
@@ -425,6 +670,8 @@
       $("ed-note").hidden = false;
       $("ed-code").hidden = true;
       $("ed-preview").hidden = true;
+      $("ed-md").hidden = true;
+      $("ed-wrap").hidden = true;
       $("ed-note").textContent = String(e.message || e);
       $("ed-name").textContent = basename(path);
       showEditor(true);
@@ -435,6 +682,7 @@
     if (!(await maybeSave())) return;
     state.openPath = "";
     state.orig = "";
+    state.kind = "";
     showEditor(false);
     treeQ.focus();
   }
@@ -475,7 +723,7 @@
   }
 
   function syncDirty() {
-    const dirty = edBody.value !== state.orig && !$("ed-code").hidden;
+    const dirty = state.kind === "text" && edBody.value !== state.orig;
     $("ed-dot").hidden = !dirty;
     if (dirty) {
       $("ed-save").hidden = false;
@@ -1142,7 +1390,7 @@
       toggleFiles();
     }
     if (mod && e.key.toLowerCase() === "s") {
-      if (state.editing && !$("ed-code").hidden) {
+      if (state.editing && state.kind === "text") {
         e.preventDefault();
         saveFile();
       }
@@ -1214,6 +1462,28 @@
   $("ed-wrap").addEventListener("click", () => {
     state.wrap = !state.wrap;
     applyWrap();
+  });
+  $("ed-md").addEventListener("click", () => {
+    state.mdPreview = !state.mdPreview;
+    if (!state.mdPreview) {
+      $("ed-code").hidden = false;
+      $("ed-preview").hidden = true;
+      $("ed-preview").classList.remove("has-md");
+      $("ed-md-view").hidden = true;
+      applyMdView();
+      updateGutter();
+      updateLoc();
+      edBody.focus({ preventScroll: true });
+    } else {
+      applyMdView();
+    }
+  });
+  $("ed-md-view").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-path]");
+    if (!t) return;
+    e.preventDefault();
+    const path = t.getAttribute("data-path");
+    if (path) openFile(path);
   });
   edBody.addEventListener("input", () => { updateGutter(); syncDirty(); });
   edBody.addEventListener("scroll", () => { edGutter.scrollTop = edBody.scrollTop; });
