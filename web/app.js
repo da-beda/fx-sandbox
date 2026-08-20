@@ -63,7 +63,7 @@
   function setPerm(p) {
     state.perm = PERMS.includes(p) ? p : "yolo";
     localStorage.setItem("fxs.perm", state.perm);
-    $("menu-perm").textContent = state.perm;
+    $("menu-perm").textContent = state.perm[0].toUpperCase() + state.perm.slice(1);
   }
 
   function cyclePerm() {

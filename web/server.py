@@ -237,7 +237,7 @@ def run_fxs(ws: str, fx_args: list[str], perm: str = "yolo", timeout: int = 90) 
     cmd = [bin_, "run", "-w", ws]
     if perm != "yolo":
         cmd.append("--no-yolo")
-    cmd += ["--perm", perm, "--"] + fx_args
+    cmd += ["--"] + fx_args
     env = os.environ.copy()
     env["FX_MODEL"] = MODEL
     env["FX_PERMISSION_MODE"] = perm
@@ -314,6 +314,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, code: int, obj) -> None:
         self._send(code, json.dumps(obj).encode(), "application/json; charset=utf-8")
+
+    def do_HEAD(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def do_GET(self) -> None:
         u = urlparse(self.path)
@@ -530,7 +536,7 @@ class Handler(BaseHTTPRequestHandler):
         cmd = [bin_, "run", "-w", ws]
         if perm != "yolo":
             cmd.append("--no-yolo")
-        cmd += ["--perm", perm, "--", "ask", "--json"]
+        cmd += ["--", "ask", "--json"]
         if perm == "yolo":
             cmd.append("--yolo")
         if resume:
