@@ -128,6 +128,38 @@ def session_title(path: Path) -> str:
     return path.name[:24]
 
 
+def list_models() -> list[dict]:
+    fallback = [
+        {"id": "zai/glm-5.2"},
+        {"id": "zai/glm-5.2-fast", "note": "not in the free promo"},
+    ]
+    fx = which("fx")
+    if not fx or demo_mode():
+        return fallback
+    try:
+        r = subprocess.run(
+            [fx, "models", "--json"],
+            capture_output=True,
+            timeout=12,
+            text=True,
+        )
+        if r.returncode != 0 or not r.stdout.strip():
+            return fallback
+        data = json.loads(r.stdout)
+    except Exception:
+        return fallback
+    rows = data if isinstance(data, list) else data.get("models") or data.get("data") or []
+    out = []
+    for m in rows:
+        if isinstance(m, str):
+            out.append({"id": m})
+        elif isinstance(m, dict):
+            mid = m.get("id") or m.get("model") or m.get("name")
+            if mid:
+                out.append({"id": mid})
+    return out or fallback
+
+
 def list_sessions(ws: str) -> list[dict]:
     import hashlib
 
@@ -207,6 +239,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._json(400, {"error": str(e), "sessions": []})
             return
+        if u.path == "/api/models":
+            self._json(200, {"models": list_models()})
+            return
         self._static(u.path)
 
     def _static(self, path: str) -> None:
@@ -280,6 +315,7 @@ class Handler(BaseHTTPRequestHandler):
             ws,
             str(payload.get("resume") or ""),
             bool(payload.get("yolo", True)),
+            str(payload.get("model") or MODEL),
             emit,
         )
 
@@ -292,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
             "Demo — this machine has no Docker, so nothing ran.\n\n"
             "On yours:\n\n"
             "```\ncd /path/to/project\nfxs ui\n```\n\n"
-            "Same sandbox as `fxs`. Esc stops. yolo is the default."
+            "Same sandbox as `fxs`. `/` opens commands. Esc stops."
         )
         for word in text.split(" "):
             emit({"type": "token", "text": word + " "})
@@ -300,7 +336,7 @@ class Handler(BaseHTTPRequestHandler):
         emit({"type": "activity", "text": ""})
         emit({"type": "done"})
 
-    def _run_fxs(self, prompt: str, ws: str, resume: str, yolo: bool, emit) -> None:
+    def _run_fxs(self, prompt: str, ws: str, resume: str, yolo: bool, model: str, emit) -> None:
         fxs = which("fxs") or which("run-fx")
         if not fxs:
             emit({"type": "error", "text": "fxs is not on PATH"})
@@ -316,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             cmd += ["--resume", resume]
         cmd += ["--", prompt]
         env = os.environ.copy()
-        env["FX_MODEL"] = MODEL
+        env["FX_MODEL"] = model or MODEL
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -346,6 +382,7 @@ class Handler(BaseHTTPRequestHandler):
         t = threading.Thread(target=pump_err, daemon=True)
         t.start()
         assert proc.stdout is not None
+        collected = []
         while True:
             chunk = proc.stdout.read(80)
             if not chunk:
@@ -353,25 +390,43 @@ class Handler(BaseHTTPRequestHandler):
             piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
             if not piece:
                 continue
-            # docker wrapper should not be on stdout; still drop fxs: lines
             kept = []
             for line in piece.splitlines(True):
                 if FXS_LINE.match(line):
                     continue
                 kept.append(line)
             if kept:
-                emit({"type": "token", "text": "".join(kept)})
+                text = "".join(kept)
+                collected.append(text)
+                emit({"type": "token", "text": text})
         proc.wait()
         t.join(timeout=1)
         with PROC_LOCK:
             if CURRENT.get("proc") is proc:
                 CURRENT["proc"] = None
+        blob = "".join(collected).strip()
+        if blob.startswith("{"):
+            try:
+                data = json.loads(blob)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                sid = data.get("session_id")
+                if sid:
+                    emit({"type": "session", "id": sid})
+                tools = data.get("tool_calls") or []
+                if tools:
+                    emit({"type": "tools", "tools": tools})
         if proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
                 emit({"type": "activity", "text": "stopped"})
             else:
                 emit({"type": "error", "text": f"exit {proc.returncode}"})
         emit({"type": "done"})
+
+
+class Server(ThreadingHTTPServer):
+    allow_reuse_address = True
 
 
 def pick_host_port() -> tuple[str, int]:
@@ -392,7 +447,7 @@ def pick_host_port() -> tuple[str, int]:
 
 def main() -> None:
     host, port = pick_host_port()
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd = Server((host, port), Handler)
     url = f"http://{host}:{port}"
     sys.stderr.write(f"fxs-ui: {url}  demo={demo_mode()}\n")
     if host in ("127.0.0.1", "localhost") and os.environ.get("FXS_UI_OPEN") != "0":

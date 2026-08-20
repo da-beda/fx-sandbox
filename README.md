@@ -106,7 +106,7 @@ fxs ui
 
 Opens `http://127.0.0.1:8787`. No npm. Python 3 stdlib. `--bind-all` / `--port` if you need them. `--demo` if Docker is not up.
 
-Folder, sessions (`--resume last`), yolo/auto, theme (system / light / dark), Esc to stop. Same sandbox as `fxs`.
+Folder, sessions, yolo/auto, model, theme (system / light / dark). Type `/` for commands. Esc stops. Same sandbox as `fxs`.
 
 Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 
