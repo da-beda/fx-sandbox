@@ -42,7 +42,7 @@
     treeCursor: "",
     openPath: "",
     orig: "",
-    wrap: localStorage.getItem("fxs.wrap") === "1",
+    wrap: localStorage.getItem("fxs.wrap") !== "0",
     filesW: clampW(parseInt(localStorage.getItem("fxs.filesW") || "340", 10)),
     editing: false,
   };
@@ -52,11 +52,18 @@
 
   function clampW(n) {
     if (!Number.isFinite(n)) return 340;
-    return Math.min(560, Math.max(280, n));
+    return Math.min(720, Math.max(280, n));
   }
 
   function mobile() {
-    return window.matchMedia("(max-width: 720px)").matches;
+    return window.matchMedia("(max-width: 840px)").matches;
+  }
+
+  function applyWrap() {
+    filesEl.classList.toggle("wrap", state.wrap);
+    $("ed-wrap").classList.toggle("on", state.wrap);
+    edBody.setAttribute("wrap", state.wrap ? "soft" : "off");
+    localStorage.setItem("fxs.wrap", state.wrap ? "1" : "0");
   }
 
   function basename(p) {
@@ -186,13 +193,13 @@
     state.filesOn = !!on;
     localStorage.setItem("fxs.filesOn", on ? "1" : "0");
     filesEl.hidden = !on;
-    veil.hidden = !(on && mobile());
+    veil.hidden = !(on && mobile() && !state.editing);
     document.body.classList.toggle("files-on", on);
     $("files-btn").classList.toggle("on", on);
     $("files-btn").setAttribute("aria-expanded", on ? "true" : "false");
     filesEl.style.setProperty("--files-w", state.filesW + "px");
     if (on) {
-      filesEl.classList.toggle("wrap", state.wrap);
+      applyWrap();
       if (!state.tree.length) loadTree();
       else renderTree();
     } else {
@@ -207,8 +214,11 @@
   function showEditor(on) {
     state.editing = !!on;
     filesEl.classList.toggle("editing", on);
+    veil.hidden = !(state.filesOn && mobile() && !on);
     if (!on) {
       document.querySelectorAll(".tree-item.on").forEach((el) => el.classList.remove("on"));
+    } else {
+      applyWrap();
     }
   }
 
@@ -1067,14 +1077,21 @@
   });
   $("ed-wrap").addEventListener("click", () => {
     state.wrap = !state.wrap;
-    localStorage.setItem("fxs.wrap", state.wrap ? "1" : "0");
-    filesEl.classList.toggle("wrap", state.wrap);
-    $("ed-wrap").classList.toggle("on", state.wrap);
+    applyWrap();
   });
   edBody.addEventListener("input", () => { updateGutter(); syncDirty(); });
   edBody.addEventListener("scroll", () => { edGutter.scrollTop = edBody.scrollTop; });
   edBody.addEventListener("keyup", updateLoc);
   edBody.addEventListener("click", updateLoc);
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if ($("ed-code").hidden) return;
+      edGutter.scrollTop = edBody.scrollTop;
+    }).observe(edBody);
+  }
+  window.addEventListener("resize", () => {
+    veil.hidden = !(state.filesOn && mobile() && !state.editing);
+  });
   edBody.addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
       e.preventDefault();
@@ -1139,14 +1156,13 @@
   applyTheme();
   setPerm(state.perm);
   setWorkspace(state.workspace);
-  filesEl.classList.toggle("wrap", state.wrap);
-  $("ed-wrap").classList.toggle("on", state.wrap);
+  applyWrap();
   filesEl.style.setProperty("--files-w", state.filesW + "px");
   grow();
   refreshStatus();
   if (state.filesOn) showFiles(true);
-  window.matchMedia("(max-width: 720px)").addEventListener("change", () => {
-    veil.hidden = !(state.filesOn && mobile());
+  window.matchMedia("(max-width: 840px)").addEventListener("change", () => {
+    veil.hidden = !(state.filesOn && mobile() && !state.editing);
   });
   promptEl.focus();
 })();

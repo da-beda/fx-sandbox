@@ -536,37 +536,67 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   grid-column: 2;
   grid-row: 1 / -1;
   width: var(--files-w, 340px);
-  min-width: 280px;
-  max-width: 560px;
+  min-width: 0;
+  max-width: min(560px, 100%);
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--line);
   position: relative;
+  overflow: hidden;
+  transition: width var(--fast) var(--ease);
+}
+.files.editing {
+  width: min(48rem, max(var(--files-w, 340px), 46vw));
+  max-width: min(52rem, calc(100% - 4rem));
 }
 .files[hidden] { display: none; }
 .files-view {
+  position: relative;
   flex: 1;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 .files-stack {
-  display: flex;
-  width: 200%;
+  position: relative;
+  width: 100%;
   height: 100%;
-  transform: translateX(0);
-  transition: transform var(--fast) var(--ease);
+  min-width: 0;
+  overflow: hidden;
 }
-.files.editing .files-stack { transform: translateX(-50%); }
 .pane {
-  width: 50%;
-  flex: 0 0 50%;
+  position: absolute;
+  inset: 0;
+  width: auto;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  transition: transform var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+#explorer {
+  transform: translateX(0);
+  opacity: 1;
+  z-index: 1;
+}
+.files.editing #explorer {
+  transform: translateX(-6%);
+  opacity: 0;
+  pointer-events: none;
+}
+#editor {
+  transform: translateX(8%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.files.editing #editor {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 .pane-bar {
   display: flex;
@@ -685,6 +715,9 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
 .ed-code {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   display: flex;
   overflow: hidden;
   background: transparent;
@@ -704,20 +737,31 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   white-space: pre;
 }
 .ed-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
   padding: 14px 14px 48px 10px;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 20px;
   resize: none;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   overflow: auto;
   tab-size: 2;
   background: transparent;
+  field-sizing: fixed;
 }
-.files.wrap .ed-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.files:not(.wrap) .ed-body {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.files.wrap .ed-gutter { display: none; }
+.files.wrap .ed-body { padding-left: 16px; }
 .ed-preview {
   flex: 1;
   min-height: 0;
@@ -765,7 +809,7 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   z-index: 2;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 840px) {
   .files {
     position: fixed;
     top: 0;
@@ -773,15 +817,25 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
     bottom: 0;
     grid-column: auto;
     grid-row: auto;
-    width: min(100vw - 72px, 340px);
+    width: min(100% - 48px, 380px);
     max-width: none;
     z-index: 40;
     border-left: 1px solid var(--line);
     border-radius: var(--radius-lg) 0 0 var(--radius-lg);
     box-shadow: 0 24px 80px color-mix(in srgb, #000 28%, transparent);
     animation: pop var(--fast) var(--ease);
+    transition: none;
+  }
+  .files.editing {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+    border-left: 0;
+    box-shadow: none;
   }
   .files-close { display: grid; }
+  .files.editing .files-close { display: none; }
   .veil:not([hidden]) {
     display: block;
     position: fixed;
