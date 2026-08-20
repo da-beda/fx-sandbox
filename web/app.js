@@ -723,7 +723,19 @@
     thread.innerHTML = "";
     const blank = $("blank");
     if (blank) blank.hidden = false;
+    playMark();
     promptEl.focus();
+  }
+
+  function playMark() {
+    const mark = document.querySelector("#blank .mark");
+    if (!mark || $("blank")?.hidden) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    mark.querySelectorAll(".shimmer-band").forEach((el) => {
+      el.classList.remove("is-playing");
+      void el.getBoundingClientRect();
+      el.classList.add("is-playing");
+    });
   }
 
   async function loadModels() {
@@ -1146,4 +1158,9 @@
     veil.hidden = !(state.filesOn && mobile());
   });
   promptEl.focus();
+  const blank = $("blank");
+  if (blank) {
+    blank.addEventListener("pointerenter", playMark);
+    requestAnimationFrame(() => setTimeout(playMark, 280));
+  }
 })();
