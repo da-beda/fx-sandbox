@@ -1049,13 +1049,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
         perm = clean_perm(perm)
-        fx_args = ["ask", "--json"]
+        base = ["ask", "--json"]
         if perm == "yolo":
-            fx_args.append("--yolo")
+            base.append("--yolo")
+        resume_flag: list[str] = []
         if resume and resume != "last":
-            fx_args += ["--resume", resume]
-        elif resume == "last" and list_sessions(ws):
-            fx_args += ["--resume", "last"]
+            resume_flag = ["--resume", str(resume)[:80]]
+        elif resume == "last" and sandbox_ok() and list_sessions(ws):
+            resume_flag = ["--resume", "last"]
+        img_flags: list[str] = []
         for img in images[:4]:
             p = str(img)
             if not p or ".." in p:
@@ -1065,65 +1067,85 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             abs_img = p if os.path.isabs(p) else os.path.join(ws, p)
             if os.path.isfile(abs_img):
-                fx_args += ["--image", abs_img]
-        fx_args += ["--", prompt]
-        try:
-            cmd = agent_argv(ws, fx_args, perm)
-        except FileNotFoundError as e:
-            emit({"type": "error", "text": str(e)})
-            emit({"type": "done"})
-            return
-        env = os.environ.copy()
-        env["FX_MODEL"] = MODEL
-        env["FX_PERMISSION_MODE"] = perm
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=ws,
-                env=env,
-                start_new_session=True,
-            )
-        except OSError as e:
-            emit({"type": "error", "text": str(e)})
-            emit({"type": "done"})
-            return
-        with PROC_LOCK:
-            CURRENT["proc"] = proc
+                img_flags += ["--image", abs_img]
 
-        err_chunks: list[str] = []
-
-        def pump_err() -> None:
-            assert proc.stderr is not None
-            for raw in iter(proc.stderr.readline, b""):
-                line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
-                if not line or FXS_LINE.match(line):
-                    continue
-                err_chunks.append(line)
-                step = parse_step(line)
-                if step:
-                    emit(step)
-
-
-        t = threading.Thread(target=pump_err, daemon=True)
-        t.start()
-        chunks: list[str] = []
-        assert proc.stdout is not None
+        raw_out = ""
+        err_text = ""
+        proc = None
+        pending_steps: list[dict] = []
+        attempt_resume = bool(resume_flag)
         while True:
-            chunk = proc.stdout.read(256)
-            if not chunk:
-                break
-            piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
-            if piece:
-                chunks.append(piece)
-        proc.wait()
-        t.join(timeout=1)
-        with PROC_LOCK:
-            if CURRENT.get("proc") is proc:
-                CURRENT["proc"] = None
-        raw_out = "".join(chunks)
-        err_text = "\n".join(err_chunks)
+            fx_args = base + resume_flag + img_flags + ["--", prompt]
+            try:
+                cmd = agent_argv(ws, fx_args, perm)
+            except FileNotFoundError as e:
+                emit({"type": "error", "text": str(e)})
+                emit({"type": "done"})
+                return
+            env = os.environ.copy()
+            env["FX_MODEL"] = MODEL
+            env["FX_PERMISSION_MODE"] = perm
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=ws,
+                    env=env,
+                    start_new_session=True,
+                )
+            except OSError as e:
+                emit({"type": "error", "text": str(e)})
+                emit({"type": "done"})
+                return
+            with PROC_LOCK:
+                CURRENT["proc"] = proc
+
+            err_chunks: list[str] = []
+            pending_steps = []
+
+            def pump_err() -> None:
+                assert proc.stderr is not None
+                for raw in iter(proc.stderr.readline, b""):
+                    line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
+                    if not line or FXS_LINE.match(line):
+                        continue
+                    err_chunks.append(line)
+                    step = parse_step(line)
+                    if not step:
+                        continue
+                    if resume_flag:
+                        pending_steps.append(step)
+                    else:
+                        emit(step)
+
+            t = threading.Thread(target=pump_err, daemon=True)
+            t.start()
+            chunks: list[str] = []
+            assert proc.stdout is not None
+            while True:
+                chunk = proc.stdout.read(256)
+                if not chunk:
+                    break
+                piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
+                if piece:
+                    chunks.append(piece)
+            proc.wait()
+            t.join(timeout=1)
+            with PROC_LOCK:
+                if CURRENT.get("proc") is proc:
+                    CURRENT["proc"] = None
+            raw_out = "".join(chunks)
+            err_text = "\n".join(err_chunks)
+            blob = raw_out + "\n" + err_text
+            if attempt_resume and "NoSavedSessions" in blob:
+                resume_flag = []
+                attempt_resume = False
+                continue
+            break
+
+        for step in pending_steps:
+            emit(step)
         data = extract_json(raw_out) or extract_json(err_text)
         emitted = False
         if isinstance(data, dict):
@@ -1153,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
             if text:
                 emit({"type": "token", "text": "".join(kept)})
                 emitted = True
-        if proc.returncode not in (0, None):
+        if proc is not None and proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
                 emit({"type": "step", "id": "run", "kind": "status",
                       "label": "Stopped", "status": "warn"})

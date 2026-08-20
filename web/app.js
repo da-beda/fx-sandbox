@@ -1665,7 +1665,7 @@
         body: JSON.stringify({
           prompt: text,
           workspace: state.workspace,
-          resume: state.resume || "last",
+          resume: state.resume || "",
           perm: state.perm,
         }),
       });
