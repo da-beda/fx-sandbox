@@ -500,11 +500,16 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   transform: rotate(-90deg);
   color: var(--muted);
 }
-.step.fold:hover .ico-kind,
 .step.fold.open .ico-kind { opacity: 0; }
-.step.fold:hover .ico-chev,
-.step.fold.open .ico-chev { opacity: 1; }
-.step.fold.open .ico-chev { transform: rotate(0deg); }
+.step.fold.open .ico-chev { opacity: 1; transform: rotate(0deg); }
+@media (hover: hover) and (pointer: fine) {
+  .step.fold:hover .ico-kind { opacity: 0; }
+  .step.fold:hover .ico-chev { opacity: 1; }
+  .step.fold:hover .verb,
+  .step .hit:hover .verb { color: var(--fg); }
+  .step.fold:hover .det,
+  .step .hit:hover .det { color: var(--muted); }
+}
 .step .hit {
   grid-column: 2;
   display: flex;
@@ -545,10 +550,6 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   transition: color var(--quick) var(--ease);
 }
 .step .num { font-variant-numeric: tabular-nums; }
-.step.fold:hover .verb,
-.step .hit:hover .verb { color: var(--fg); }
-.step.fold:hover .det,
-.step .hit:hover .det { color: var(--muted); }
 .step.running .verb.shimmer {
   background: linear-gradient(90deg, var(--subtle) 20%, var(--fg) 50%, var(--subtle) 80%);
   background-size: 200% 100%;
