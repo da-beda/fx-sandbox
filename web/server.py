@@ -24,6 +24,37 @@ STATE_ROOT = HOME / ".local" / "share" / "fx-sandbox" / "state"
 ENV_FILE = HOME / ".config" / "fx" / "env"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 FXS_LINE = re.compile(r"^fxs:")
+NOTICE_ATT = re.compile(r"attempt\s+(\d+)\s*/\s*(\d+)", re.I)
+NOTICE_WAIT = re.compile(r"in\s+(\d+)\s*s", re.I)
+BRACKET_TOOL = re.compile(r"^\[([a-z0-9_]+)\]\s*(.*)$", re.I)
+TOOL_KIND = {
+    "read": ("read", "Read"),
+    "write": ("write", "Wrote"),
+    "edit": ("write", "Edited"),
+    "open_file": ("read", "Read"),
+    "file_info": ("read", "Read"),
+    "write_file": ("write", "Wrote"),
+    "edit_file": ("write", "Edited"),
+    "delete_file": ("delete", "Deleted"),
+    "rename_file": ("write", "Renamed"),
+    "copy_file": ("write", "Copied"),
+    "create_folder": ("list", "Created"),
+    "list_files": ("list", "Listed"),
+    "glob_files": ("search", "Found"),
+    "grep_files": ("search", "Searched"),
+    "semantic_search": ("search", "Searched"),
+    "run_command": ("run", "Ran"),
+    "bash": ("run", "Ran"),
+    "shell": ("run", "Ran"),
+    "web_search": ("web", "Searched"),
+    "web_fetch": ("web", "Fetched"),
+    "fetch": ("web", "Fetched"),
+    "search": ("search", "Searched"),
+    "subagent": ("agent", "Agent"),
+    "vision": ("image", "Looked"),
+    "ask_user_question": ("status", "Asked"),
+    "install_skill": ("skill", "Skill"),
+}
 
 DANGEROUS = {
     "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root",
@@ -34,34 +65,176 @@ DANGEROUS = {
 PROC_LOCK = threading.Lock()
 CURRENT: dict = {"proc": None}
 
+SKIP_DIRS = {
+    ".git", "node_modules", ".venv", "dist", "target", "__pycache__",
+    ".fx", ".next", "vendor",
+}
+MAX_TREE = 800
+MAX_TEXT = 1_000_000
+MAX_IMAGE = 4_000_000
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+SAFE_FX = {
+    "models", "usage", "credits", "balance", "permissions", "status",
+    "doctor", "sessions", "workspace", "help", "version",
+}
+CATALOG_MODELS = [
+    {"id": "zai/glm-5.2", "label": "GLM 5.2"},
+    {"id": "anthropic/claude-sonnet-4.6", "label": "Sonnet 4.6"},
+    {"id": "openai/gpt-5.2", "label": "GPT-5.2"},
+]
+PREFERRED_MODELS = [m["id"] for m in CATALOG_MODELS]
+HIDDEN_UNLESS_CURRENT = {"zai/glm-5.2-fast"}
+MAX_MODELS = 48
+
 
 def load_env_file() -> None:
-    if not ENV_FILE.is_file():
-        return
-    for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[7:]
-        k, _, v = line.partition("=")
-        v = v.strip().strip("'").strip('"')
-        os.environ.setdefault(k.strip(), v)
+    if ENV_FILE.is_file():
+        for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            k, _, v = line.partition("=")
+            v = v.strip().strip("'").strip('"')
+            os.environ.setdefault(k.strip(), v)
+    if not os.environ.get("AI_GATEWAY_API_KEY", "").startswith("vck_"):
+        key_file = HOME / ".fx" / "api-key"
+        if key_file.is_file():
+            try:
+                k = key_file.read_text(encoding="utf-8").strip()
+                if k.startswith("vck_"):
+                    os.environ.setdefault("AI_GATEWAY_API_KEY", k)
+            except OSError:
+                pass
 
 
 load_env_file()
+MODEL = os.environ.get("FX_MODEL", MODEL)
+if MODEL == "zai/glm-5.2-fast":
+    MODEL = "zai/glm-5.2"
+    os.environ["FX_MODEL"] = MODEL
+
+
+def shorten(s: str, n: int = 72) -> str:
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def parse_step(line: str) -> dict | None:
+    line = ANSI.sub("", line or "").strip()
+    if not line or FXS_LINE.match(line):
+        return None
+    if line.startswith("[notice]"):
+        body = re.sub(r"^[⚠✓]\s*", "", line[8:].strip())
+        low = body.lower()
+        if "paused after" in low:
+            return {
+                "type": "step", "id": "retry", "kind": "retry",
+                "label": "Model unavailable", "detail": "gave up", "status": "warn",
+            }
+        if "recovered" in low or "succeeded on attempt" in low:
+            return {
+                "type": "step", "id": "retry", "kind": "ok",
+                "label": "Model recovered", "status": "ok",
+            }
+        if "retrying" in low or "unavailable" in low or "503" in body:
+            att = NOTICE_ATT.search(body)
+            wait = NOTICE_WAIT.search(body)
+            detail = f"{att.group(1)}/{att.group(2)}" if att else ""
+            if wait:
+                detail = (detail + " · " if detail else "") + wait.group(1) + "s"
+            return {
+                "type": "step", "id": "retry", "kind": "retry",
+                "label": "Waiting on the model", "detail": detail, "status": "running",
+            }
+        head = body.split("·")[0].strip()
+        return {
+            "type": "step", "kind": "status",
+            "label": shorten(head, 64), "status": "running",
+        }
+    m = BRACKET_TOOL.match(line)
+    if m:
+        raw = m.group(1).lower()
+        rest = m.group(2).strip()
+        kind, verb = TOOL_KIND.get(raw, ("tool", raw.replace("_", " ")))
+        path = rest if rest and (("/" in rest) or ("." in rest)) else ""
+        label = f"{verb} {shorten(Path(rest).name if path else rest, 48)}".strip() if rest else verb
+        return {
+            "type": "step", "kind": kind, "label": label,
+            "detail": rest, "path": path, "status": "running",
+        }
+    if len(line) > 180:
+        line = line[-120:]
+    return {"type": "step", "kind": "status", "label": shorten(line, 64), "status": "running"}
+
+
+def tool_step(tcall) -> dict:
+    if not isinstance(tcall, dict):
+        name = str(tcall).strip()
+        tcall = {"name": name}
+    name = str(tcall.get("name") or "tool").strip()
+    parts = name.split(None, 1)
+    key = parts[0].lower().replace("-", "_")
+    rest = parts[1] if len(parts) > 1 else ""
+    kind, verb = TOOL_KIND.get(key, ("tool", key.replace("_", " ")))
+    path = str(tcall.get("path") or tcall.get("file") or tcall.get("target") or "")
+    cmd = str(tcall.get("command") or tcall.get("cmd") or "")
+    query = str(tcall.get("query") or tcall.get("pattern") or "")
+    extra = path or cmd or query or rest
+    if extra and not path and ("/" in extra or "." in extra) and " " not in extra:
+        path = extra
+    label = verb
+    if extra:
+        shown = Path(extra).name if path else extra
+        label = f"{verb} {shorten(shown, 42)}".strip()
+    st = str(tcall.get("status") or "ok").lower()
+    if st in ("success", "ok", "completed", "done"):
+        st = "ok"
+    elif st in ("error", "failed", "fail"):
+        st = "warn"
+    else:
+        st = "running" if st in ("running", "in_progress", "pending") else "ok"
+    return {
+        "type": "step", "kind": kind, "label": label,
+        "detail": extra, "path": path, "status": st,
+    }
 
 
 def which(name: str) -> str | None:
     return shutil.which(name)
 
 
-def demo_mode() -> bool:
-    if os.environ.get("FXS_UI_DEMO") == "1":
+def local_mode() -> bool:
+    if os.environ.get("FXS_UI_LOCAL") == "1":
         return True
-    if os.environ.get("FXS_UI_DEMO") == "0":
+    if os.environ.get("FXS_UI_LOCAL") == "0":
         return False
-    return which("fxs") is None and which("docker") is None
+    return not can_live()
+
+
+def sandbox_ok() -> bool:
+    if os.geteuid() == 0:
+        return False
+    if not (which("fxs") or which("run-fx")):
+        return False
+    return docker_state() == "running"
+
+
+def can_live() -> bool:
+    if which("fx"):
+        return True
+    return sandbox_ok()
+
+
+def backend_name() -> str:
+    if local_mode():
+        return "offline"
+    if sandbox_ok():
+        return "sandbox"
+    if which("fx"):
+        return "native"
+    return "offline"
 
 
 def workspace_ok(path: str) -> str:
@@ -89,7 +262,15 @@ def default_workspace() -> str:
 
 
 def has_key() -> bool:
-    return os.environ.get("AI_GATEWAY_API_KEY", "").startswith("vck_")
+    if os.environ.get("AI_GATEWAY_API_KEY", "").startswith("vck_"):
+        return True
+    p = HOME / ".fx" / "api-key"
+    if p.is_file():
+        try:
+            return p.read_text(encoding="utf-8").strip().startswith("vck_")
+        except OSError:
+            return False
+    return False
 
 
 def docker_state() -> str:
@@ -149,6 +330,302 @@ def list_sessions(ws: str) -> list[dict]:
     return out[:40]
 
 
+def fuzzy_score(query: str, text: str) -> int:
+    q = (query or "").lower()
+    t = (text or "").lower()
+    if not q:
+        return 1
+    if q in t:
+        return 2000 - t.find(q) - (len(t) - len(q))
+    i = 0
+    score = 0
+    last = -2
+    for j, ch in enumerate(t):
+        if i < len(q) and ch == q[i]:
+            score += 6 if j == last + 1 else 1
+            if j == 0 or t[j - 1] in "/-._ ":
+                score += 10
+            last = j
+            i += 1
+    return score if i == len(q) else 0
+
+
+def list_files(ws: str, query: str) -> list[str]:
+    scored: list[tuple[int, str]] = []
+    root = Path(ws)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        rel_dir = os.path.relpath(dirpath, root)
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+            rel = rel.replace("\\", "/")
+            s = fuzzy_score(query, rel)
+            if query and s <= 0:
+                continue
+            scored.append((s, rel))
+            if len(scored) >= 400:
+                break
+        if len(scored) >= 400:
+            break
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [p for _, p in scored[:40]]
+
+
+def resolve_in_ws(ws: str, rel: str) -> Path:
+    rel = (rel or "").replace("\\", "/").strip()
+    if rel.startswith("/"):
+        rel = rel.lstrip("/")
+    if not rel or rel in (".", "..") or ".." in Path(rel).parts:
+        raise ValueError("bad path")
+    root = Path(ws).resolve()
+    target = (root / rel).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError("outside workspace")
+    return target
+
+
+def list_tree(ws: str) -> dict:
+    root = Path(ws)
+    count = 0
+    truncated = False
+
+    def walk(dirpath: Path, rel: str) -> list:
+        nonlocal count, truncated
+        items: list[dict] = []
+        try:
+            entries = sorted(
+                dirpath.iterdir(),
+                key=lambda p: (not p.is_dir(), p.name.lower()),
+            )
+        except OSError:
+            return items
+        for p in entries:
+            if truncated:
+                break
+            name = p.name
+            if name.startswith(".") or name in SKIP_DIRS:
+                continue
+            count += 1
+            if count > MAX_TREE:
+                truncated = True
+                break
+            child = name if not rel else f"{rel}/{name}"
+            if p.is_dir() and not p.is_symlink():
+                items.append({
+                    "name": name,
+                    "path": child,
+                    "type": "dir",
+                    "children": walk(p, child),
+                })
+            elif p.is_file():
+                try:
+                    size = int(p.stat().st_size)
+                except OSError:
+                    size = 0
+                items.append({
+                    "name": name,
+                    "path": child,
+                    "type": "file",
+                    "size": size,
+                })
+        return items
+
+    return {"tree": walk(root, ""), "truncated": truncated, "count": count}
+
+
+def read_workspace_file(ws: str, rel: str) -> dict:
+    p = resolve_in_ws(ws, rel)
+    if not p.is_file():
+        raise ValueError("not a file")
+    ext = p.suffix.lower()
+    try:
+        size = int(p.stat().st_size)
+    except OSError:
+        size = 0
+    if ext in IMAGE_EXT:
+        if size > MAX_IMAGE:
+            return {"kind": "binary", "path": rel, "size": size, "name": p.name}
+        import base64
+        mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }[ext]
+        src = "data:" + mime + ";base64," + base64.b64encode(p.read_bytes()).decode("ascii")
+        return {"kind": "image", "path": rel, "size": size, "name": p.name, "src": src}
+    if size > MAX_TEXT:
+        return {"kind": "binary", "path": rel, "size": size, "name": p.name}
+    raw = p.read_bytes()
+    if b"\0" in raw[:8192]:
+        return {"kind": "binary", "path": rel, "size": size, "name": p.name}
+    return {
+        "kind": "text",
+        "path": rel,
+        "size": size,
+        "name": p.name,
+        "text": raw.decode("utf-8", errors="replace"),
+    }
+
+
+def write_workspace_file(ws: str, rel: str, text: str) -> dict:
+    p = resolve_in_ws(ws, rel)
+    if p.exists() and not p.is_file():
+        raise ValueError("not a file")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = text if isinstance(text, str) else ""
+    p.write_text(data, encoding="utf-8")
+    return {"ok": True, "path": rel, "size": int(p.stat().st_size), "name": p.name}
+
+
+def extract_json(text: str):
+    text = (text or "").strip()
+    if not text:
+        return None
+    for start in (text.rfind("{"), text.find("{")):
+        if start < 0:
+            continue
+        try:
+            return json.loads(text[start:])
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def fxs_bin() -> str | None:
+    return which("fxs") or which("run-fx")
+
+
+def fx_bin() -> str | None:
+    return which("fx")
+
+
+def clean_perm(raw) -> str:
+    p = str(raw or "yolo")
+    return p if p in ("ask", "auto", "yolo") else "yolo"
+
+
+def agent_argv(ws: str, fx_args: list[str], perm: str) -> list[str]:
+    perm = clean_perm(perm)
+    args = list(fx_args)
+    if args and args[0] == "fx":
+        args = args[1:]
+    if sandbox_ok():
+        bin_ = fxs_bin()
+        if not bin_:
+            raise FileNotFoundError("fxs is not on PATH")
+        cmd = [bin_, "run", "-w", ws]
+        if perm != "yolo":
+            cmd.append("--no-yolo")
+        cmd += ["--"] + args
+        return cmd
+    fx = fx_bin()
+    if not fx:
+        raise FileNotFoundError("fx is not on PATH")
+    return [fx] + args
+
+
+def run_fxs(ws: str, fx_args: list[str], perm: str = "yolo", timeout: int = 90) -> subprocess.CompletedProcess:
+    cmd = agent_argv(ws, fx_args, perm)
+    env = os.environ.copy()
+    env["FX_MODEL"] = MODEL
+    env["FX_PERMISSION_MODE"] = perm
+    return subprocess.run(
+        cmd, capture_output=True, timeout=timeout, cwd=ws, env=env, text=True,
+    )
+
+
+def parse_models(text: str) -> list[dict]:
+    found: list[dict] = []
+    data = extract_json(text)
+    rows = None
+    if isinstance(data, list):
+        rows = data
+    elif isinstance(data, dict):
+        rows = data.get("models") or data.get("data") or data.get("ids")
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, str) and row.strip():
+                mid = row.strip()
+                found.append({"id": mid, "label": mid.split("/")[-1]})
+            elif isinstance(row, dict):
+                mid = str(row.get("id") or row.get("model") or "")
+                if mid:
+                    found.append({"id": mid, "label": str(row.get("name") or mid.split("/")[-1])})
+    else:
+        for line in text.splitlines():
+            line = ANSI.sub("", line).strip()
+            if not line:
+                continue
+            mid = line.split()[0].strip("-*·")
+            if "/" in mid and len(mid) < 80:
+                found.append({"id": mid, "label": mid.split("/")[-1]})
+    seen = set()
+    out = []
+    for m in found:
+        if m["id"] in seen:
+            continue
+        seen.add(m["id"])
+        out.append(m)
+    return out
+
+
+def rank_models(found: list[dict], current: str) -> list[dict]:
+    by_id: dict[str, dict] = {}
+    for m in found:
+        mid = m["id"]
+        if mid in HIDDEN_UNLESS_CURRENT and mid != current:
+            continue
+        by_id[mid] = m
+    out: list[dict] = []
+    for pid in PREFERRED_MODELS:
+        if pid in by_id:
+            m = by_id.pop(pid)
+            label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), m.get("label") or pid.split("/")[-1])
+            out.append({"id": pid, "label": label})
+        elif pid == current or pid == "zai/glm-5.2":
+            label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), pid.split("/")[-1])
+            out.append({"id": pid, "label": label})
+    for m in found:
+        if m["id"] in by_id:
+            out.append(by_id.pop(m["id"]))
+    if current and current not in {m["id"] for m in out}:
+        out.insert(0, {"id": current, "label": current.split("/")[-1]})
+    return out[:MAX_MODELS]
+
+
+def recover_error(stdout: str, stderr: str) -> str:
+    blob = ((stdout or "") + "\n" + (stderr or "")).strip()
+    data = extract_json(blob)
+    if isinstance(data, dict):
+        for key in ("error", "message", "errorMessage", "detail"):
+            v = data.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, dict):
+                msg = v.get("message") or v.get("code") or v.get("type")
+                if msg:
+                    return str(msg)
+        code = data.get("code") or data.get("error_code") or data.get("type")
+        if code:
+            return str(code)
+    lowered = blob.lower()
+    if "provider_unavailable" in lowered or "http 503" in lowered or " 503 " in lowered:
+        return "GLM 5.2 is unavailable (provider 503). Try again in a moment."
+    if "customer_verification_required" in lowered:
+        return "AI Gateway needs a card on file for this route."
+    if "rate_limit" in lowered:
+        return "Rate limited. Try again shortly."
+    lines = [ANSI.sub("", ln).strip() for ln in blob.splitlines()]
+    lines = [ln for ln in lines if ln and not FXS_LINE.match(ln)]
+    if lines:
+        return lines[-1][:400]
+    return "fx failed"
+
+
 def kill_current() -> None:
     with PROC_LOCK:
         proc = CURRENT.get("proc")
@@ -184,18 +661,27 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, obj) -> None:
         self._send(code, json.dumps(obj).encode(), "application/json; charset=utf-8")
 
+    def do_HEAD(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def do_GET(self) -> None:
         u = urlparse(self.path)
         if u.path == "/api/status":
             qs = parse_qs(u.query)
             ws = (qs.get("workspace") or [default_workspace()])[0]
             self._json(200, {
-                "demo": demo_mode(),
+                "live": not local_mode(),
                 "workspace": ws,
+                "default_workspace": default_workspace(),
                 "model": MODEL,
                 "key": has_key(),
                 "docker": docker_state(),
-                "fxs": bool(which("fxs")),
+                "fxs": bool(which("fxs") or which("run-fx")),
+                "fx": bool(which("fx")),
+                "backend": backend_name(),
             })
             return
         if u.path == "/api/sessions":
@@ -206,6 +692,37 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"sessions": list_sessions(ws) if ws else []})
             except ValueError as e:
                 self._json(400, {"error": str(e), "sessions": []})
+            return
+        if u.path == "/api/models":
+            self._models()
+            return
+        if u.path == "/api/files":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e), "files": []})
+                return
+            q = (qs.get("q") or [""])[0]
+            self._json(200, {"files": list_files(ws, q)})
+            return
+        if u.path == "/api/tree":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e), "tree": []})
+                return
+            self._json(200, list_tree(ws))
+            return
+        if u.path == "/api/file":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+                rel = (qs.get("path") or [""])[0]
+                self._json(200, read_workspace_file(ws, rel))
+            except (ValueError, OSError) as e:
+                self._json(400, {"error": str(e)})
             return
         self._static(u.path)
 
@@ -246,7 +763,92 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/ask":
             self._ask(payload)
             return
+        if u.path == "/api/fx":
+            self._fx(payload)
+            return
+        if u.path == "/api/model":
+            self._set_model(payload)
+            return
+        if u.path == "/api/file":
+            try:
+                ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
+                rel = str(payload.get("path") or "")
+                self._json(200, write_workspace_file(ws, rel, str(payload.get("text") or "")))
+            except (ValueError, OSError) as e:
+                self._json(400, {"error": str(e)})
+            return
         self._json(404, {"error": "not found"})
+
+    def _models(self) -> None:
+        if local_mode():
+            self._json(200, {"models": CATALOG_MODELS, "current": MODEL})
+            return
+        ws = default_workspace() or os.getcwd()
+        models: list[dict] = []
+        try:
+            ws = workspace_ok(ws)
+            r = run_fxs(ws, ["models", "--json"], timeout=60)
+            models = parse_models((r.stdout or "") + "\n" + (r.stderr or ""))
+            if not models:
+                r2 = run_fxs(ws, ["models"], timeout=60)
+                models = parse_models((r2.stdout or "") + "\n" + (r2.stderr or ""))
+        except Exception:
+            models = []
+        models = rank_models(models or list(CATALOG_MODELS), MODEL)
+        if not models:
+            models = list(CATALOG_MODELS)
+        self._json(200, {"models": models, "current": MODEL})
+
+    def _set_model(self, payload: dict) -> None:
+        global MODEL
+        mid = str(payload.get("model") or "").strip()
+        if not mid or "/" not in mid or len(mid) > 80:
+            self._json(400, {"error": "bad model"})
+            return
+        MODEL = mid
+        os.environ["FX_MODEL"] = mid
+        self._json(200, {"model": MODEL})
+
+    def _fx(self, payload: dict) -> None:
+        args = payload.get("args")
+        if not isinstance(args, list) or not args:
+            self._json(400, {"error": "args required"})
+            return
+        cmd0 = str(args[0])
+        if cmd0 not in SAFE_FX:
+            self._json(400, {"error": "command not allowed"})
+            return
+        extra = [str(a)[:200] for a in args[1:8]]
+        fx_args = [cmd0] + extra
+        if local_mode():
+            catalog = {
+                "status": MODEL,
+                "usage": "—",
+                "credits": "—",
+                "balance": "—",
+                "doctor": "ok",
+                "help": "/new  /settings  /models  /permissions",
+                "models": "\n".join(m["id"] for m in CATALOG_MODELS),
+                "sessions": "—",
+                "workspace": default_workspace() or "—",
+                "version": "fxs",
+                "permissions": "yolo",
+            }
+            self._json(200, {"ok": True, "text": catalog.get(cmd0, cmd0)})
+            return
+        try:
+            ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+            return
+        perm = clean_perm(payload.get("perm"))
+        try:
+            r = run_fxs(ws, fx_args, perm=perm, timeout=180)
+        except Exception as e:
+            self._json(500, {"error": str(e)})
+            return
+        text = ANSI.sub("", (r.stdout or "") + (("\n" + r.stderr) if r.stderr else ""))
+        self._json(200, {"ok": r.returncode == 0, "text": text.strip()[-4000:], "code": r.returncode})
 
     def _ask(self, payload: dict) -> None:
         prompt = str(payload.get("prompt") or "").strip()
@@ -265,58 +867,84 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
-        def emit(obj: dict) -> None:
-            try:
-                self.wfile.write(("data: " + json.dumps(obj) + "\n\n").encode())
-                self.wfile.flush()
-            except BrokenPipeError:
-                pass
+        emit_lock = threading.Lock()
 
-        if demo_mode():
-            self._demo(prompt, emit)
+        def emit(obj: dict) -> None:
+            with emit_lock:
+                try:
+                    self.wfile.write(("data: " + json.dumps(obj) + "\n\n").encode())
+                    self.wfile.flush()
+                except BrokenPipeError:
+                    pass
+
+        if local_mode():
+            self._local_reply(prompt, ws, emit)
             return
+        perm = clean_perm(payload.get("perm") or ("yolo" if payload.get("yolo", True) else "auto"))
         self._run_fxs(
             prompt,
             ws,
             str(payload.get("resume") or ""),
-            bool(payload.get("yolo", True)),
+            perm,
+            payload.get("images") if isinstance(payload.get("images"), list) else [],
             emit,
         )
 
-    def _demo(self, prompt: str, emit) -> None:
-        emit({"type": "tools", "tools": [{"name": "read"}, {"name": "search"}]})
-        emit({"type": "activity", "text": "read"})
-        time.sleep(0.25)
-        text = (
-            f"**{prompt.strip()[:48]}**\n\n"
-            "Demo — this machine has no Docker, so nothing ran.\n\n"
-            "On yours:\n\n"
-            "```\ncd /path/to/project\nfxs ui\n```\n\n"
-            "Same sandbox as `fxs`. Esc stops. yolo is the default."
-        )
-        for word in text.split(" "):
-            emit({"type": "token", "text": word + " "})
-            time.sleep(0.016)
-        emit({"type": "activity", "text": ""})
+    def _local_reply(self, prompt: str, ws: str, emit) -> None:
+        files = list_files(ws, "")[:12]
+        if files:
+            emit(tool_step({"name": "read_file", "path": files[0], "status": "ok"}))
+            time.sleep(0.08)
+        readme = Path(ws) / "README.md"
+        excerpt = ""
+        if readme.is_file():
+            try:
+                excerpt = readme.read_text(encoding="utf-8", errors="replace").strip()
+                excerpt = "\n".join(excerpt.splitlines()[:12])
+            except OSError:
+                excerpt = ""
+        if excerpt:
+            text = excerpt
+        elif files:
+            text = "\n".join(files[:10])
+        else:
+            text = prompt.strip().splitlines()[0][:120]
+        i = 0
+        while i < len(text):
+            emit({"type": "token", "text": text[i:i + 24]})
+            i += 24
+            time.sleep(0.008)
         emit({"type": "done"})
 
-    def _run_fxs(self, prompt: str, ws: str, resume: str, yolo: bool, emit) -> None:
-        fxs = which("fxs") or which("run-fx")
-        if not fxs:
-            emit({"type": "error", "text": "fxs is not on PATH"})
+    def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
+        perm = clean_perm(perm)
+        fx_args = ["ask", "--json"]
+        if perm == "yolo":
+            fx_args.append("--yolo")
+        if resume and resume != "last":
+            fx_args += ["--resume", resume]
+        elif resume == "last" and list_sessions(ws):
+            fx_args += ["--resume", "last"]
+        for img in images[:4]:
+            p = str(img)
+            if not p or ".." in p:
+                continue
+            ext = os.path.splitext(p)[1].lower()
+            if ext not in IMAGE_EXT:
+                continue
+            abs_img = p if os.path.isabs(p) else os.path.join(ws, p)
+            if os.path.isfile(abs_img):
+                fx_args += ["--image", abs_img]
+        fx_args += ["--", prompt]
+        try:
+            cmd = agent_argv(ws, fx_args, perm)
+        except FileNotFoundError as e:
+            emit({"type": "error", "text": str(e)})
             emit({"type": "done"})
             return
-        cmd = [fxs, "run", "-w", ws]
-        if not yolo:
-            cmd.append("--no-yolo")
-        cmd += ["--", "ask"]
-        if yolo:
-            cmd.append("--yolo")
-        if resume:
-            cmd += ["--resume", resume]
-        cmd += ["--", prompt]
         env = os.environ.copy()
         env["FX_MODEL"] = MODEL
+        env["FX_PERMISSION_MODE"] = perm
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -333,44 +961,75 @@ class Handler(BaseHTTPRequestHandler):
         with PROC_LOCK:
             CURRENT["proc"] = proc
 
+        err_chunks: list[str] = []
+
         def pump_err() -> None:
             assert proc.stderr is not None
-            last = ""
             for raw in iter(proc.stderr.readline, b""):
                 line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
                 if not line or FXS_LINE.match(line):
                     continue
-                last = line[-120:]
-                emit({"type": "activity", "text": last})
+                err_chunks.append(line)
+                step = parse_step(line)
+                if step:
+                    emit(step)
+
 
         t = threading.Thread(target=pump_err, daemon=True)
         t.start()
+        chunks: list[str] = []
         assert proc.stdout is not None
         while True:
-            chunk = proc.stdout.read(80)
+            chunk = proc.stdout.read(256)
             if not chunk:
                 break
             piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
-            if not piece:
-                continue
-            # docker wrapper should not be on stdout; still drop fxs: lines
-            kept = []
-            for line in piece.splitlines(True):
-                if FXS_LINE.match(line):
-                    continue
-                kept.append(line)
-            if kept:
-                emit({"type": "token", "text": "".join(kept)})
+            if piece:
+                chunks.append(piece)
         proc.wait()
         t.join(timeout=1)
         with PROC_LOCK:
             if CURRENT.get("proc") is proc:
                 CURRENT["proc"] = None
+        raw_out = "".join(chunks)
+        err_text = "\n".join(err_chunks)
+        data = extract_json(raw_out) or extract_json(err_text)
+        emitted = False
+        if isinstance(data, dict):
+            tools = data.get("tool_calls") or []
+            if tools:
+                for tcall in tools:
+                    emit(tool_step(tcall))
+            if data.get("session_id"):
+                emit({"type": "session", "id": data["session_id"]})
+            if data.get("model"):
+                emit({"type": "model", "id": data["model"]})
+            out = data.get("output") or ""
+            if out:
+                emit({"type": "token", "text": str(out)})
+                emitted = True
+            err = data.get("error")
+            if err and not out:
+                emit({"type": "error", "text": recover_error(raw_out, err_text)})
+                emitted = True
+        elif raw_out.strip():
+            kept = []
+            for line in raw_out.splitlines(True):
+                if FXS_LINE.match(line):
+                    continue
+                kept.append(line)
+            text = "".join(kept).strip()
+            if text:
+                emit({"type": "token", "text": "".join(kept)})
+                emitted = True
         if proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
-                emit({"type": "activity", "text": "stopped"})
-            else:
-                emit({"type": "error", "text": f"exit {proc.returncode}"})
+                emit({"type": "step", "id": "run", "kind": "status",
+                      "label": "Stopped", "status": "warn"})
+            elif not emitted:
+                emit({"type": "error", "text": recover_error(raw_out, err_text)})
+        elif not emitted and (raw_out.strip() or err_text.strip()):
+            emit({"type": "error", "text": recover_error(raw_out, err_text)})
         emit({"type": "done"})
 
 
@@ -384,17 +1043,20 @@ def pick_host_port() -> tuple[str, int]:
             host = argv[i + 1]; i += 2; continue
         if a in ("--port", "-p") and i + 1 < len(argv):
             port = int(argv[i + 1]); i += 2; continue
-        if a == "--demo":
-            os.environ["FXS_UI_DEMO"] = "1"; i += 1; continue
+        if a in ("--offline", "--local"):
+            os.environ["FXS_UI_LOCAL"] = "1"; i += 1; continue
+        if a == "--bind-all":
+            host = "0.0.0.0"; i += 1; continue
         i += 1
     return host, port
 
 
 def main() -> None:
     host, port = pick_host_port()
+    ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}"
-    sys.stderr.write(f"fxs-ui: {url}  demo={demo_mode()}\n")
+    sys.stderr.write(f"fxs-ui: {url}\n")
     if host in ("127.0.0.1", "localhost") and os.environ.get("FXS_UI_OPEN") != "0":
         opener = "open" if sys.platform == "darwin" else ("xdg-open" if which("xdg-open") else None)
         if opener:

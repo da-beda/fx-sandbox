@@ -1,3 +1,7 @@
+<p>
+  <img src="web/mark.svg" alt="fxs" height="64">
+</p>
+
 # fx-sandbox
 
 Install [fx](https://fx.sh) (Vercel Labs’ coding agent) and, optionally,
@@ -54,7 +58,8 @@ fxs key                                    # paste / replace the key
 On macOS, native `fx` already uses the OS sandbox (`sandbox=os`).
 Docker is optional and needs Docker Desktop **running**.
 
-On Linux, native fx has no OS sandbox — prefer `fxs run`.
+On Linux, native fx has no OS sandbox — prefer `fxs run` when Docker is up.
+If Docker is missing, idle, or you are root, `fxs` falls through to native `fx`.
 
 ## Commands
 
@@ -64,6 +69,10 @@ On Linux, native fx has no OS sandbox — prefer `fxs run`.
 | `fxs --no-yolo` | Same, but fx asks before tools |
 | `fxs run -c` | Resume last fxs session in this directory |
 | `fxs sessions` | List fxs sessions for `$PWD` |
+| `fxs models` | List models (`fx models`, sandbox or native) |
+| `fxs usage` / `fxs credits` | Local spend / AI Gateway balance |
+| `fxs pr` / `fxs issue` | Draft a PR or GitHub issue |
+| `fxs --perm ask\|auto\|yolo` | Permission mode (default yolo) |
 | `fxs ask …` | One-shot `fx ask` in that container |
 | `fxs ui` | Optional local web UI (`http://127.0.0.1:8787`) |
 | `fxs build` | Build `fx-sandbox:latest` |
@@ -104,9 +113,15 @@ cd /path/to/one/project
 fxs ui
 ```
 
-Opens `http://127.0.0.1:8787`. No npm. Python 3 stdlib. `--bind-all` / `--port` if you need them. `--demo` if Docker is not up.
+Opens a local page. No npm. Python 3 stdlib. `python3 web/test_server.py` covers the live-path helpers.
 
-Folder, sessions (`--resume last`), yolo/auto, theme (system / light / dark), Esc to stop. Same sandbox as `fxs`.
+Chat in the middle. While the agent runs, a quiet activity trail shows what it is doing (reads, commands, waits) and how long it has been working — so a long turn never looks stuck. A collapsible **Files** sidebar on the right is the workspace the agent sees — click a file to edit it in that same pane, chevron to go back to the tree.
+
+`⌘B` files, `⌘S` save, `⌘P` filter, `⌘N` new chat, `⌘,` settings, `?` advanced. Type `/` for commands, `@` for files (⇧Enter opens). Tool chips and `@path` in replies open the editor.
+
+`--bind-all` / `--port` if you need them. `--offline` forces the local mock (no model).
+
+When Docker is not running, the UI talks to native `fx`. Default model is `zai/glm-5.2` (the normal variant, not fast).
 
 Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 
