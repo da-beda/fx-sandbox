@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""fxs ui — tiny local frontend. No npm. Python 3.9+ stdlib only."""
+"""fxs ui — local frontend. Python 3.9+ stdlib only."""
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
-import socket
+import signal
 import subprocess
 import sys
 import threading
@@ -21,12 +22,17 @@ MODEL = os.environ.get("FX_MODEL", "zai/glm-5.2")
 HOME = Path.home()
 STATE_ROOT = HOME / ".local" / "share" / "fx-sandbox" / "state"
 ENV_FILE = HOME / ".config" / "fx" / "env"
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+FXS_LINE = re.compile(r"^fxs:")
 
 DANGEROUS = {
     "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root",
     "/run", "/sbin", "/sys", "/usr", "/var", "/Users", "/System", "/Library",
     "/Applications", "/private", "/Volumes", "/opt/homebrew",
 }
+
+PROC_LOCK = threading.Lock()
+CURRENT: dict = {"proc": None}
 
 
 def load_env_file() -> None:
@@ -68,15 +74,22 @@ def workspace_ok(path: str) -> str:
     home = str(HOME)
     if resolved == home:
         raise ValueError("refusing $HOME")
-    for bad in (home + "/.ssh", home + "/.gnupg", home + "/.aws", home + "/Library"):
-        if resolved == bad:
+    for bad in ("/.ssh", "/.gnupg", "/.aws", "/Library"):
+        if resolved == home + bad:
             raise ValueError("refusing a secret directory")
     return resolved
 
 
+def default_workspace() -> str:
+    raw = os.environ.get("FX_WORKSPACE") or os.getcwd()
+    try:
+        return workspace_ok(raw)
+    except ValueError:
+        return ""
+
+
 def has_key() -> bool:
-    k = os.environ.get("AI_GATEWAY_API_KEY", "")
-    return k.startswith("vck_")
+    return os.environ.get("AI_GATEWAY_API_KEY", "").startswith("vck_")
 
 
 def docker_state() -> str:
@@ -94,20 +107,61 @@ def docker_state() -> str:
         return "idle"
 
 
+def session_title(path: Path) -> str:
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")[:12000]
+        data = json.loads(raw)
+    except Exception:
+        return path.name[:24]
+    for key in ("title", "summary", "prompt"):
+        v = data.get(key) if isinstance(data, dict) else None
+        if isinstance(v, str) and v.strip():
+            return v.strip()[:72]
+    if isinstance(data, dict):
+        msgs = data.get("messages") or data.get("turns") or []
+        if isinstance(msgs, list):
+            for m in msgs:
+                if isinstance(m, dict):
+                    t = m.get("content") or m.get("text") or ""
+                    if isinstance(t, str) and t.strip():
+                        return t.strip()[:72]
+    return path.name[:24]
+
+
 def list_sessions(ws: str) -> list[dict]:
     import hashlib
 
     h = hashlib.sha256(ws.encode()).hexdigest()[:16]
     d = STATE_ROOT / h
-    if not d.is_dir():
+    sessions = d / "sessions"
+    if not sessions.is_dir():
         return []
     out = []
-    sessions = d / "sessions"
-    if sessions.is_dir():
-        for p in sorted(sessions.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            out.append({"id": p.name, "title": p.name[:24], "mtime": int(p.stat().st_mtime)})
-    origin = d / "origin"
+    for p in sorted(sessions.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.name.startswith("."):
+            continue
+        sid = p.stem if p.suffix else p.name
+        out.append({
+            "id": sid,
+            "title": session_title(p) if p.is_file() else sid[:24],
+            "mtime": int(p.stat().st_mtime),
+        })
     return out[:40]
+
+
+def kill_current() -> None:
+    with PROC_LOCK:
+        proc = CURRENT.get("proc")
+        CURRENT["proc"] = None
+    if not proc or proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -122,17 +176,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _json(self, code: int, obj) -> None:
-        raw = json.dumps(obj).encode()
-        self._send(code, raw, "application/json; charset=utf-8")
+        self._send(code, json.dumps(obj).encode(), "application/json; charset=utf-8")
 
     def do_GET(self) -> None:
         u = urlparse(self.path)
         if u.path == "/api/status":
             qs = parse_qs(u.query)
-            ws = (qs.get("workspace") or [os.environ.get("FX_WORKSPACE", "")])[0]
+            ws = (qs.get("workspace") or [default_workspace()])[0]
             self._json(200, {
                 "demo": demo_mode(),
                 "workspace": ws,
@@ -154,16 +210,17 @@ class Handler(BaseHTTPRequestHandler):
         self._static(u.path)
 
     def _static(self, path: str) -> None:
-        rel = path if path != "/" else "/index.html"
-        rel = rel.lstrip("/")
-        if ".." in rel or rel.startswith("/"):
+        rel = "index.html" if path in ("/", "") else path.lstrip("/")
+        if ".." in rel:
             self._send(404, b"not found", "text/plain")
             return
         fp = (HERE / rel).resolve()
-        if HERE not in fp.parents and fp != HERE:
-            # file in HERE
-            pass
-        if not str(fp).startswith(str(HERE)) or not fp.is_file():
+        try:
+            fp.relative_to(HERE)
+        except ValueError:
+            self._send(404, b"not found", "text/plain")
+            return
+        if not fp.is_file():
             self._send(404, b"not found", "text/plain")
             return
         ctype = {
@@ -181,7 +238,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError:
-            self._json(400, {"error": "bad json"})
+            payload = {}
+        if u.path == "/api/stop":
+            kill_current()
+            self._json(200, {"ok": True})
             return
         if u.path == "/api/ask":
             self._ask(payload)
@@ -194,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "empty"})
             return
         try:
-            ws = workspace_ok(str(payload.get("workspace") or ""))
+            ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return
@@ -215,65 +275,107 @@ class Handler(BaseHTTPRequestHandler):
         if demo_mode():
             self._demo(prompt, emit)
             return
-        self._run_fxs(prompt, ws, payload.get("resume"), emit)
+        self._run_fxs(
+            prompt,
+            ws,
+            str(payload.get("resume") or ""),
+            bool(payload.get("yolo", True)),
+            emit,
+        )
 
     def _demo(self, prompt: str, emit) -> None:
+        emit({"type": "tools", "tools": [{"name": "read"}, {"name": "search"}]})
+        emit({"type": "activity", "text": "read"})
+        time.sleep(0.25)
         text = (
-            "Demo mode — Docker/fx is not on this machine, so nothing was run.\n\n"
+            f"**{prompt.strip()[:48]}**\n\n"
+            "Demo — this machine has no Docker, so nothing ran.\n\n"
             "On yours:\n\n"
             "```\ncd /path/to/project\nfxs ui\n```\n\n"
-            "That talks to the same sandbox as `fxs` (one folder, yolo, GLM 5.2).\n\n"
-            f"You asked: {prompt}"
+            "Same sandbox as `fxs`. Esc stops. yolo is the default."
         )
-        for ch in text.split(" "):
-            emit({"type": "token", "text": ch + " "})
-            time.sleep(0.012)
+        for word in text.split(" "):
+            emit({"type": "token", "text": word + " "})
+            time.sleep(0.016)
+        emit({"type": "activity", "text": ""})
         emit({"type": "done"})
 
-    def _run_fxs(self, prompt: str, ws: str, resume, emit) -> None:
+    def _run_fxs(self, prompt: str, ws: str, resume: str, yolo: bool, emit) -> None:
         fxs = which("fxs") or which("run-fx")
         if not fxs:
             emit({"type": "error", "text": "fxs is not on PATH"})
             emit({"type": "done"})
             return
-        cmd = [fxs, "run", "-w", ws, "--", "ask", "--yolo", "--no-color"]
+        cmd = [fxs, "run", "-w", ws]
+        if not yolo:
+            cmd.append("--no-yolo")
+        cmd += ["--", "ask"]
+        if yolo:
+            cmd.append("--yolo")
         if resume:
-            cmd += ["--resume", str(resume)]
+            cmd += ["--resume", resume]
         cmd += ["--", prompt]
-        emit({"type": "log", "text": " ".join(cmd[:6]) + " …"})
+        env = os.environ.copy()
+        env["FX_MODEL"] = MODEL
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 cwd=ws,
-                env=os.environ.copy(),
+                env=env,
+                start_new_session=True,
             )
         except OSError as e:
             emit({"type": "error", "text": str(e)})
             emit({"type": "done"})
             return
+        with PROC_LOCK:
+            CURRENT["proc"] = proc
+
+        def pump_err() -> None:
+            assert proc.stderr is not None
+            last = ""
+            for raw in iter(proc.stderr.readline, b""):
+                line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
+                if not line or FXS_LINE.match(line):
+                    continue
+                last = line[-120:]
+                emit({"type": "activity", "text": last})
+
+        t = threading.Thread(target=pump_err, daemon=True)
+        t.start()
         assert proc.stdout is not None
-        buf = ""
         while True:
-            chunk = proc.stdout.read(64)
+            chunk = proc.stdout.read(80)
             if not chunk:
                 break
-            try:
-                piece = chunk.decode("utf-8", errors="replace")
-            except Exception:
-                piece = ""
-            buf += piece
-            emit({"type": "token", "text": piece})
+            piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
+            if not piece:
+                continue
+            # docker wrapper should not be on stdout; still drop fxs: lines
+            kept = []
+            for line in piece.splitlines(True):
+                if FXS_LINE.match(line):
+                    continue
+                kept.append(line)
+            if kept:
+                emit({"type": "token", "text": "".join(kept)})
         proc.wait()
+        t.join(timeout=1)
+        with PROC_LOCK:
+            if CURRENT.get("proc") is proc:
+                CURRENT["proc"] = None
         if proc.returncode not in (0, None):
-            emit({"type": "error", "text": f"exit {proc.returncode}"})
+            if proc.returncode and proc.returncode < 0:
+                emit({"type": "activity", "text": "stopped"})
+            else:
+                emit({"type": "error", "text": f"exit {proc.returncode}"})
         emit({"type": "done"})
 
 
 def pick_host_port() -> tuple[str, int]:
-    host = HOST
-    port = PORT
+    host, port = HOST, PORT
     argv = sys.argv[1:]
     i = 0
     while i < len(argv):
@@ -296,11 +398,18 @@ def main() -> None:
     if host in ("127.0.0.1", "localhost") and os.environ.get("FXS_UI_OPEN") != "0":
         opener = "open" if sys.platform == "darwin" else ("xdg-open" if which("xdg-open") else None)
         if opener:
-            threading.Timer(0.4, lambda: subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)).start()
+            threading.Timer(
+                0.4,
+                lambda: subprocess.Popen(
+                    [opener, url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                ),
+            ).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        pass
+        kill_current()
 
 
 if __name__ == "__main__":
