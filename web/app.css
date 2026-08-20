@@ -870,7 +870,6 @@ body.rail-on .rail {
   grid-column: 2;
   grid-row: 1;
 }
-.rail-find-btn { display: none; }
 .rail-close { display: none; }
 .rail-body {
   display: flex;
@@ -1008,7 +1007,8 @@ body.rail-on .rail {
   letter-spacing: -0.011em;
 }
 .rail-menu button:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.rail-menu button[data-act="delete"] { color: var(--warn); }
+.rail-menu button[data-act="delete"],
+.rail-menu button[data-act="confirm"] { color: var(--warn); }
 
 .files {
   grid-area: files;
@@ -1416,10 +1416,10 @@ body.rail-on .rail {
     animation: pop var(--fast) var(--ease);
   }
   .rail-bar {
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
   }
   #rail-toggle { display: none; }
-  .rail-close { display: grid; grid-column: 3; }
+  .rail-close { display: grid; grid-column: 2; }
   .rail-more { opacity: 1; pointer-events: auto; }
   .files {
     position: fixed;

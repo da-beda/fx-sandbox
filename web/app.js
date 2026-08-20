@@ -179,15 +179,37 @@
     return MD_EXT.test(path || "");
   }
 
+  function resolveMdPath(url) {
+    url = String(url || "").trim();
+    let path = url.split("#")[0].split("?")[0].replace(/\\/g, "/");
+    if (!path || /^(https?:|data:|mailto:|javascript:|vbscript:)/i.test(path)) return "";
+    const rooted = path.startsWith("/");
+    path = path.replace(/^\.\//, "").replace(/^\/+/, "");
+    const dir = (state.openPath || "").replace(/\/[^/]*$/, "");
+    const joined = (!rooted && dir) ? dir + "/" + path : path;
+    const out = [];
+    for (const part of joined.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        if (!out.length) return "";
+        out.pop();
+        continue;
+      }
+      out.push(part);
+    }
+    return out.join("/");
+  }
+
   function mdUrl(url, img) {
     url = String(url || "").trim();
-    if (/^(https?:|data:|mailto:)/i.test(url)) return url;
-    const path = url.replace(/^\.\//, "").split("#")[0].split("?")[0];
+    if (/^https?:/i.test(url)) return url;
+    if (img && /^data:image\/(png|jpe?g|gif|webp)[;,]/i.test(url)) return url;
+    const path = resolveMdPath(url);
     if (img && state.workspace && path) {
       return "/api/file?raw=1&workspace=" + encodeURIComponent(state.workspace) +
         "&path=" + encodeURIComponent(path);
     }
-    return url;
+    return "";
   }
 
   function mdLink(url, inner, title) {
@@ -197,7 +219,8 @@
       return '<a href="' + esc(url) + '" target="_blank" rel="noopener"' + t + ">" + inner + "</a>";
     }
     if (url.startsWith("#")) return '<a href="' + esc(url) + '"' + t + ">" + inner + "</a>";
-    const path = url.replace(/^\.\//, "").split("#")[0].split("?")[0];
+    const path = resolveMdPath(url);
+    if (!path) return inner;
     return '<a href="#"' + t + ' data-path="' + esc(path) + '">' + inner + "</a>";
   }
 
@@ -1212,6 +1235,11 @@
     if (!railMenu) return;
     railMenu.hidden = true;
     menuSession = null;
+    const del = railMenu.querySelector("[data-act]");
+    if (del) {
+      del.setAttribute("data-act", "delete");
+      del.textContent = "Delete";
+    }
   }
 
   function openRailMenu(btn, s) {
@@ -1221,6 +1249,11 @@
       return;
     }
     menuSession = s;
+    const del = railMenu.querySelector("[data-act]");
+    if (del) {
+      del.setAttribute("data-act", "delete");
+      del.textContent = "Delete";
+    }
     railMenu.hidden = false;
     const r = btn.getBoundingClientRect();
     const w = railMenu.offsetWidth || 148;
@@ -1811,8 +1844,10 @@
       toggleRail();
     }
     if (mod && e.key.toLowerCase() === "f") {
-      e.preventDefault();
-      focusFind();
+      if (state.railOn) {
+        e.preventDefault();
+        focusFind();
+      }
     }
     if (mod && e.key.toLowerCase() === "s") {
       if (state.editing && state.kind === "text") {
@@ -1875,7 +1910,6 @@
     toggleRail();
   });
   $("rail-close").addEventListener("click", () => showRail(false));
-  $("rail-find").addEventListener("click", focusFind);
   $("files-btn").addEventListener("click", toggleFiles);
   $("files-close").addEventListener("click", () => showFiles(false));
   $("settings-close").addEventListener("click", () => settings.close());
@@ -1901,7 +1935,13 @@
     railMenu.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act]");
       if (!act || !menuSession) return;
-      if (act.getAttribute("data-act") === "delete") deleteSession(menuSession);
+      const kind = act.getAttribute("data-act");
+      if (kind === "delete") {
+        act.setAttribute("data-act", "confirm");
+        act.textContent = "Delete chat?";
+        return;
+      }
+      if (kind === "confirm") deleteSession(menuSession);
     });
   }
   document.addEventListener("pointerdown", (e) => {
