@@ -871,11 +871,16 @@ class Handler(BaseHTTPRequestHandler):
     def _set_provider(self, payload: dict) -> None:
         name = str(payload.get("provider") or payload.get("url") or "").strip()
         model = str(payload.get("model") or "").strip()
+        api = str(payload.get("api") or "").strip()
         if not name:
-            self._json(200, gateway.current_provider())
-            return
+            if api:
+                cur = gateway.current_provider()
+                name = cur.get("url") or cur.get("id") or "vercel"
+            else:
+                self._json(200, gateway.current_provider())
+                return
         try:
-            info = gateway.apply_provider(name, model)
+            info = gateway.apply_provider(name, model, api=api)
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return

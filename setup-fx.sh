@@ -108,6 +108,7 @@ COMMANDS
   status               What is installed, keyed, and running
   key                  Paste a Vercel (vck_…) or OpenAI-compatible key
   provider [name|url]  vercel | openai | xai | openrouter | ollama | /v1 URL
+                       --api auto|chat|responses
   unpack [dir]         Write Dockerfile / compose / configs to disk
   uninstall            Remove fxs, the fx wrapper, and the kit
   ui                   Open the optional local web UI
@@ -131,6 +132,7 @@ AFTER INSTALL
 
 The API key is stored in ~/.config/fx/env (0600), never in the image.
 OpenAI-compatible providers: fxs provider xai
+OpenAI / xAI use Responses (/v1/responses); others stay on Chat Completions.
 Companion files are embedded; the only extra download is the fx tarball.
 EOF
 }
@@ -431,6 +433,7 @@ write_fx_wrapper() {
     printf '%s\n' '  _had_up="${FX_UPSTREAM-}"'
     printf '%s\n' '  _had_oai="${OPENAI_API_KEY-}"'
     printf '%s\n' '  _had_base="${OPENAI_BASE_URL-}"'
+    printf '%s\n' '  _had_api="${FX_UPSTREAM_API-}"'
     printf '%s\n' '  set -a'
     printf '%s\n' '  # shellcheck disable=SC1090'
     printf '%s\n' '  . "${HOME}/.config/fx/env"'
@@ -439,7 +442,8 @@ write_fx_wrapper() {
     printf '%s\n' '  [ -n "${_had_up}" ] && FX_UPSTREAM="$_had_up"'
     printf '%s\n' '  [ -n "${_had_oai}" ] && OPENAI_API_KEY="$_had_oai"'
     printf '%s\n' '  [ -n "${_had_base}" ] && OPENAI_BASE_URL="$_had_base"'
-    printf '%s\n' '  unset _had_key _had_up _had_oai _had_base'
+    printf '%s\n' '  [ -n "${_had_api}" ] && FX_UPSTREAM_API="$_had_api"'
+    printf '%s\n' '  unset _had_key _had_up _had_oai _had_base _had_api'
     printf '%s\n' 'fi'
     printf '%s\n' 'if [ -n "${FX_UPSTREAM:-${OPENAI_BASE_URL:-}}" ]; then'
     printf '%s\n' '  _gw="${HOME}/.local/share/fx-sandbox/web/gateway.py"'
@@ -933,6 +937,7 @@ load_fx_env() {
     local had_up="${FX_UPSTREAM-}"
     local had_oai="${OPENAI_API_KEY-}"
     local had_base="${OPENAI_BASE_URL-}"
+    local had_api="${FX_UPSTREAM_API-}"
     set -a
     # shellcheck disable=SC1090
     . "${HOME}/.config/fx/env"
@@ -941,6 +946,7 @@ load_fx_env() {
     [[ -n "$had_up" ]] && FX_UPSTREAM="$had_up"
     [[ -n "$had_oai" ]] && OPENAI_API_KEY="$had_oai"
     [[ -n "$had_base" ]] && OPENAI_BASE_URL="$had_base"
+    [[ -n "$had_api" ]] && FX_UPSTREAM_API="$had_api"
   fi
 }
 
@@ -1151,6 +1157,9 @@ _up="$(openai_upstream)"
 if [[ -n "$_up" ]]; then
   _up="$(rewrite_upstream_for_docker "$_up")"
   DOCKER_ARGS+=(-e "FX_UPSTREAM=${_up}" -e "OPENAI_BASE_URL=${_up}")
+  if [[ -n "${FX_UPSTREAM_API:-}" ]]; then
+    DOCKER_ARGS+=(-e "FX_UPSTREAM_API")
+  fi
   log "openai upstream=${_up} (loopback translator inside the box)"
 fi
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
@@ -1309,6 +1318,7 @@ services:
       AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
       FX_UPSTREAM: ${FX_UPSTREAM:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-${FX_UPSTREAM:-}}
+      FX_UPSTREAM_API: ${FX_UPSTREAM_API:-auto}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
@@ -1378,6 +1388,7 @@ FX_PERMISSION_MODE=auto
 #   FX_UPSTREAM=http://127.0.0.1:11434/v1          # local Ollama
 #   FX_UPSTREAM=https://openrouter.ai/api/v1
 #   FX_UPSTREAM=https://api.openai.com/v1
+#   FX_UPSTREAM_API=auto   # responses on OpenAI/xAI, chat elsewhere
 
 # Host uid:gid so files created in the bind-mount belong to you.
 #   echo "FX_UID=$(id -u)" >> .env
@@ -1989,6 +2000,9 @@ cmd_status() {
   provider_state="Vercel AI Gateway"
   if [[ -n "${FX_UPSTREAM:-${OPENAI_BASE_URL:-}}" ]]; then
     provider_state="${FX_UPSTREAM:-${OPENAI_BASE_URL}}"
+    if [[ -n "${FX_UPSTREAM_API:-}" && "${FX_UPSTREAM_API}" != "auto" ]]; then
+      provider_state="${provider_state}  (${FX_UPSTREAM_API})"
+    fi
   fi
 
   cat >&2 <<EOF
@@ -2030,12 +2044,16 @@ cmd_provider() {
   if [[ -z "$MODE" ]]; then MODE="host"; fi
   load_fx_env_file
   local args=("${RUN_ARGS[@]+"${RUN_ARGS[@]}"}")
-  local name="" model=""
+  local name="" model="" api=""
   local i=0
   while [[ $i -lt ${#args[@]} ]]; do
     case "${args[$i]}" in
       --model|-m)
         model="${args[$((i+1))]:-}"
+        i=$((i + 2))
+        ;;
+      --api)
+        api="${args[$((i+1))]:-}"
         i=$((i + 2))
         ;;
       -h|--help)
@@ -2053,6 +2071,13 @@ fxs provider — point fx at Vercel or any OpenAI-compatible /v1
   fxs provider together | fireworks | deepseek | mistral
   fxs provider https://host/v1
   fxs provider xai --model grok-4
+  fxs provider xai --api responses
+  fxs provider ollama --api chat
+
+OpenAI and xAI default to the Responses API (reasoning, tool items,
+prompts not stored). Everyone else stays on Chat Completions. Auto
+falls back if /responses is missing. Override with --api or
+FX_UPSTREAM_API=auto|chat|responses.
 
 One command: sets the URL, prompts for a key if needed, picks a model
 that host lists. Then: fxs
@@ -2075,6 +2100,7 @@ EOF
     else
       log "provider  ${up}"
       log "model     ${FX_MODEL:-${DEFAULT_MODEL}}"
+      log "api       ${FX_UPSTREAM_API:-auto}"
       log "key       $([[ -n "${OPENAI_API_KEY:-}" ]] && echo ok || echo "missing — fxs key")"
     fi
     return 0
@@ -2105,18 +2131,22 @@ EOF
     py="$(kit_dest)/web/gateway.py"
   fi
   if [[ -n "$py" ]] && command -v python3 >/dev/null 2>&1; then
-    local json
+    local json apply_args=("--apply" "$name")
     if [[ -n "$model" ]]; then
-      json="$(python3 "$py" --apply "$name" --model "$model")" || die "could not switch provider"
-    else
-      json="$(python3 "$py" --apply "$name")" || die "could not switch provider"
+      apply_args+=(--model "$model")
     fi
+    if [[ -n "$api" ]]; then
+      apply_args+=(--api "$api")
+    fi
+    json="$(python3 "$py" "${apply_args[@]}")" || die "could not switch provider"
     load_fx_env_file
-    local got_url got_model got_need
+    local got_url got_model got_need got_api got_eff
     got_url="$(printf '%s' "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('url') or '')")"
     got_model="$(printf '%s' "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('model') or '')")"
     got_need="$(printf '%s' "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print('1' if d.get('needs_key') else '0')")"
     got_warn="$(printf '%s' "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('warn') or '')")"
+    got_api="$(printf '%s' "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('api') or '')")"
+    got_eff="$(printf '%s' "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('effective_api') or '')")"
     if [[ -z "$got_url" ]]; then
       ok "provider  Vercel AI Gateway"
     else
@@ -2124,6 +2154,13 @@ EOF
     fi
     if [[ -n "$got_model" ]]; then
       ok "model     ${got_model}"
+    fi
+    if [[ -n "$got_url" && -n "$got_eff" && "$got_eff" != "vercel" ]]; then
+      if [[ "$got_api" == "auto" && "$got_api" != "$got_eff" ]]; then
+        ok "api       ${got_eff} (auto)"
+      else
+        ok "api       ${got_eff}"
+      fi
     fi
     if [[ -n "$got_warn" ]]; then
       warn "$got_warn"
@@ -2139,12 +2176,17 @@ EOF
   if [[ -z "$url" ]]; then
     upsert_fx_env FX_UPSTREAM ""
     upsert_fx_env OPENAI_BASE_URL ""
-    export FX_UPSTREAM="" OPENAI_BASE_URL=""
+    upsert_fx_env FX_UPSTREAM_API ""
+    export FX_UPSTREAM="" OPENAI_BASE_URL="" FX_UPSTREAM_API=""
     ok "provider  Vercel AI Gateway"
   else
     upsert_fx_env FX_UPSTREAM "$url"
     upsert_fx_env OPENAI_BASE_URL "$url"
     export FX_UPSTREAM="$url" OPENAI_BASE_URL="$url"
+    if [[ -n "$api" ]]; then
+      upsert_fx_env FX_UPSTREAM_API "$api"
+      export FX_UPSTREAM_API="$api"
+    fi
     if [[ "${AI_GATEWAY_API_KEY:-}" == vck_* || -z "${AI_GATEWAY_API_KEY:-}" ]]; then
       export AI_GATEWAY_API_KEY=local
       upsert_fx_env AI_GATEWAY_API_KEY local

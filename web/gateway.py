@@ -9,7 +9,9 @@ does not need a second binary or a second terminal.
   fx  --Gateway-->  127.0.0.1:18787  --/v1-->  OpenAI / xAI / Ollama / …
 
 Wire format: PROTOCOL.md in fx-openai (catalog rewrite, prompt→messages,
-SSE text-delta / tool-input-* / finish).
+SSE text-delta / tool-input-* / finish). OpenAI and xAI default to
+POST /v1/responses (reasoning, tool items, store=false). Everyone else
+stays on /v1/chat/completions; auto falls back if /responses is missing.
 """
 from __future__ import annotations
 
@@ -80,6 +82,10 @@ DEFAULT_MODELS = {
     "custom": "",
 }
 LOCAL_PROVIDERS = {"ollama", "lmstudio"}
+# Hosts that prefer /v1/responses (reasoning + tool items). Others stay on
+# chat/completions unless the user sets FX_UPSTREAM_API=responses.
+RESPONSES_DEFAULT = {"openai", "xai"}
+_REASONING_EFFORT = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 ERR_INVALID_BODY = "invalid gateway request body"
@@ -166,6 +172,33 @@ def api_key_from_env(getenv: Callable[[str], str] = lambda k: os.environ.get(k, 
 
 def configured_upstream(getenv: Callable[[str], str] = lambda k: os.environ.get(k, "")) -> str:
     return (getenv("FX_UPSTREAM") or getenv("OPENAI_BASE_URL") or "").rstrip("/")
+
+
+def normalize_api(raw: str) -> str:
+    v = (raw or "auto").strip().lower()
+    if v in ("chat", "completions", "chat.completions", "chat_completions", "completion"):
+        return "chat"
+    if v in ("responses", "response", "/responses", "v1/responses", "/v1/responses"):
+        return "responses"
+    if v in ("auto", "", "default"):
+        return "auto"
+    raise ValueError(f"unknown API {raw!r} (try auto, chat, responses)")
+
+
+def configured_api(getenv: Callable[[str], str] = lambda k: os.environ.get(k, "")) -> str:
+    try:
+        return normalize_api(getenv("FX_UPSTREAM_API") or "auto")
+    except ValueError:
+        return "auto"
+
+
+def effective_api(pid: str = "", api: str = "") -> str:
+    """Concrete upstream path: 'chat' or 'responses'."""
+    mode = api or configured_api()
+    if mode in ("chat", "responses"):
+        return mode
+    pid = pid or provider_id_for(configured_upstream())
+    return "responses" if pid in RESPONSES_DEFAULT else "chat"
 
 
 def resolve_provider(name_or_url: str) -> dict[str, str]:
@@ -282,6 +315,8 @@ def current_provider() -> dict[str, Any]:
         "key": has,
         "vercel": not up,
         "model": os.environ.get("FX_MODEL", ""),
+        "api": "vercel" if not up else configured_api(),
+        "effective_api": "vercel" if not up else effective_api(pid),
         "providers": PROVIDERS,
     }
 
@@ -473,6 +508,177 @@ def tool_choice(raw: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# translate: Gateway request → OpenAI Responses API
+# ---------------------------------------------------------------------------
+
+def responses_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
+    """Same inbound Gateway body, outbound /v1/responses.
+
+    store is always false: a coding-agent sandbox should not leave prompts
+    on the provider's servers.
+    """
+    out = responses_from_chat(chat_request(model, stream, body))
+    try:
+        inbound = json.loads(body.decode() if body else b"{}")
+    except json.JSONDecodeError:
+        inbound = {}
+    reasoning = _responses_reasoning(inbound if isinstance(inbound, dict) else {})
+    if reasoning:
+        out["reasoning"] = reasoning
+    return out
+
+
+def responses_from_chat(chat: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "model": chat["model"],
+        "stream": bool(chat.get("stream")),
+        "store": False,
+        "input": chat_messages_to_input(chat.get("messages") or []),
+    }
+    if chat.get("max_tokens"):
+        out["max_output_tokens"] = chat["max_tokens"]
+    tools = []
+    for tool in chat.get("tools") or []:
+        fn = (tool or {}).get("function") or {}
+        name = fn.get("name") or ""
+        if not name:
+            continue
+        tools.append({
+            "type": "function",
+            "name": name,
+            "description": fn.get("description") or "",
+            "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+        })
+    if tools:
+        out["tools"] = tools
+    if chat.get("tool_choice") is not None:
+        out["tool_choice"] = chat["tool_choice"]
+    return out
+
+
+def _responses_reasoning(inbound: dict) -> Optional[dict]:
+    r = (inbound or {}).get("reasoning")
+    if r in (None, "", False):
+        return None
+    if isinstance(r, dict):
+        effort = str(r.get("effort") or r.get("level") or "").strip().lower()
+        out: dict[str, Any] = {}
+        if effort in _REASONING_EFFORT:
+            out["effort"] = effort
+        if r.get("summary") not in (None, ""):
+            out["summary"] = r["summary"]
+        return out or None
+    if isinstance(r, str) and r.strip().lower() in _REASONING_EFFORT:
+        return {"effort": r.strip().lower()}
+    return None
+
+
+def chat_messages_to_input(messages: list[dict]) -> list[dict]:
+    """Chat Completions messages[] → Responses input[] items."""
+    items: list[dict] = []
+    for msg in messages or []:
+        role = (msg or {}).get("role") or ""
+        if role == "tool":
+            items.append({
+                "type": "function_call_output",
+                "call_id": msg.get("tool_call_id") or "",
+                "output": msg.get("content") or "",
+            })
+            continue
+        content = msg.get("content") or ""
+        calls = msg.get("tool_calls") or []
+        if role in ("system", "user", "assistant") and (content or not calls):
+            items.append({"role": role, "content": content})
+        for tc in calls:
+            fn = (tc or {}).get("function") or {}
+            items.append({
+                "type": "function_call",
+                "call_id": tc.get("id") or "",
+                "name": fn.get("name") or "",
+                "arguments": fn.get("arguments") or "{}",
+            })
+    return items
+
+
+def responses_to_chat(raw: bytes | str | dict) -> bytes:
+    """Non-stream Responses JSON → the OpenAI chat shape fx's workers expect."""
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        data = json.loads(raw or "{}")
+    text: list[str] = []
+    tool_calls: list[dict] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        t = item.get("type") or ""
+        if t == "message":
+            for part in item.get("content") or []:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("output_text", "text") and part.get("text"):
+                    text.append(str(part["text"]))
+        elif t == "function_call":
+            tool_calls.append({
+                "id": item.get("call_id") or item.get("id") or "",
+                "type": "function",
+                "function": {
+                    "name": item.get("name") or "",
+                    "arguments": item.get("arguments") or "{}",
+                },
+            })
+    if not text and data.get("output_text"):
+        text.append(str(data["output_text"]))
+    finish = "tool_calls" if tool_calls else "stop"
+    status = data.get("status") or ""
+    if status == "incomplete":
+        reason = str((data.get("incomplete_details") or {}).get("reason") or "")
+        if "filter" in reason:
+            finish = "content_filter"
+        else:
+            finish = "length"
+    elif status == "failed":
+        finish = "stop"
+    msg: dict[str, Any] = {"role": "assistant", "content": "".join(text)}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    out: dict[str, Any] = {"choices": [{"finish_reason": finish, "message": msg}]}
+    usage = data.get("usage") or {}
+    pin = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    cout = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+    if pin or cout:
+        out["usage"] = {"prompt_tokens": pin, "completion_tokens": cout}
+    return json.dumps(out, separators=(",", ":")).encode()
+
+
+def responses_usage(resp_obj: dict) -> dict:
+    usage = (resp_obj or {}).get("usage") or {}
+    return {
+        "prompt_tokens": int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
+    }
+
+
+def should_fallback_to_chat(code: int, body: bytes = b"") -> bool:
+    """404/405/501, or a 400/422 that means 'this host has no /responses'."""
+    if code in (404, 405, 501):
+        return True
+    if code not in (400, 422):
+        return False
+    text = (body or b"").decode("utf-8", "replace").lower()
+    needles = (
+        "unknown request url", "not found", "no route", "unrecognized",
+        "invalid url", "unknown endpoint", "unknown path", "/chat/completions",
+        "does not support", "not supported",
+        "unknown parameter", "unknown field", "unexpected keyword",
+        "extra inputs are not permitted",
+    )
+    return any(n in text for n in needles)
+
+
+# ---------------------------------------------------------------------------
 # translate: OpenAI SSE → Gateway events
 # ---------------------------------------------------------------------------
 
@@ -606,6 +812,219 @@ class Stream:
         return acc
 
 
+class ResponseStream(Stream):
+    """OpenAI Responses SSE (`response.output_text.delta`, …) → Gateway events."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: dict[str, str] = {}  # item_id → call_id
+
+    def consume(self, data: bytes | str) -> list[bytes]:
+        if isinstance(data, str):
+            data = data.encode()
+        data = data.strip()
+        if not data or data == b"[DONE]":
+            return []
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(chunk, dict):
+            return []
+        t = chunk.get("type") or ""
+        events: list[bytes] = []
+        if t == "error" or chunk.get("error") not in (None, "", {}, []) and t in ("error", "response.failed", ""):
+            err = chunk.get("error") or chunk.get("message") or chunk
+            events.append(_j({"type": "error", "error": err}))
+            if t == "response.failed":
+                events.extend(self._finalize("error", responses_usage(chunk.get("response") or {})))
+            return events
+        if t in ("response.output_text.delta", "response.refusal.delta"):
+            delta = chunk.get("delta") or ""
+            if delta:
+                events.append(_j({"type": "text-delta", "delta": delta}))
+            return events
+        if t in (
+            "response.reasoning_summary_text.delta",
+            "response.reasoning_text.delta",
+            "response.reasoning.delta",
+        ):
+            delta = chunk.get("delta") or ""
+            if delta:
+                events.append(_j({"type": "reasoning-delta", "delta": delta}))
+            return events
+        if t == "response.output_item.added":
+            events.extend(self._item_added(chunk.get("item") or {}))
+            return events
+        if t == "response.output_item.done":
+            events.extend(self._item_done(chunk.get("item") or {}))
+            return events
+        if t == "response.function_call_arguments.delta":
+            acc = self._acc_for(chunk)
+            args = chunk.get("delta") or ""
+            if args:
+                acc["args"] += args
+                if acc["started"]:
+                    events.append(_j({
+                        "type": "tool-input-delta",
+                        "id": acc["id"],
+                        "delta": args,
+                    }))
+            return events
+        if t == "response.function_call_arguments.done":
+            acc = self._acc_for(chunk)
+            final = chunk.get("arguments")
+            if isinstance(final, str) and final and not acc["args"]:
+                acc["args"] = final
+            return events
+        if t == "response.completed":
+            resp = chunk.get("response") or {}
+            events.extend(self._harvest_output(resp.get("output") or []))
+            events.extend(self._finalize(self._reason_from(resp), responses_usage(resp)))
+            return events
+        if t == "response.incomplete":
+            resp = chunk.get("response") or {}
+            events.extend(self._harvest_output(resp.get("output") or []))
+            events.extend(self._finalize(self._reason_from(resp), responses_usage(resp)))
+            return events
+        if t == "response.failed":
+            resp = chunk.get("response") or {}
+            err = (resp.get("error") or chunk.get("error") or "upstream failed")
+            events.append(_j({"type": "error", "error": err}))
+            events.extend(self._finalize("error", responses_usage(resp)))
+            return events
+        return events
+
+    def _reason_from(self, resp: dict) -> str:
+        status = (resp or {}).get("status") or ""
+        if status == "failed":
+            return "error"
+        if status == "incomplete":
+            reason = str(((resp or {}).get("incomplete_details") or {}).get("reason") or "")
+            if "filter" in reason:
+                return "content_filter"
+            return "length"
+        if self.order:
+            return "tool_calls"
+        return "stop"
+
+    def _item_added(self, item: dict) -> list[bytes]:
+        if (item or {}).get("type") != "function_call":
+            return []
+        call_id = item.get("call_id") or item.get("id") or ""
+        item_id = item.get("id") or ""
+        if item_id and call_id:
+            self.ids[item_id] = call_id
+        acc = self._named(call_id or item_id)
+        if call_id:
+            acc["id"] = call_id
+        if item.get("name"):
+            acc["name"] = item["name"]
+        if item.get("arguments"):
+            acc["args"] += item["arguments"]
+        events: list[bytes] = []
+        if not acc["started"] and acc["id"] and acc["name"]:
+            acc["started"] = True
+            events.append(_j({
+                "type": "tool-input-start",
+                "id": acc["id"],
+                "toolName": acc["name"],
+            }))
+            if item.get("arguments"):
+                events.append(_j({
+                    "type": "tool-input-delta",
+                    "id": acc["id"],
+                    "delta": item["arguments"],
+                }))
+        return events
+
+    def _item_done(self, item: dict) -> list[bytes]:
+        if (item or {}).get("type") != "function_call":
+            return []
+        call_id = item.get("call_id") or item.get("id") or ""
+        item_id = item.get("id") or ""
+        acc = None
+        if call_id:
+            acc = self.tools.get(call_id)
+        if acc is None and item_id:
+            acc = self.tools.get(self.ids.get(item_id, item_id))
+        if acc and acc.get("started"):
+            if item.get("arguments") and not acc["args"]:
+                acc["args"] = item["arguments"]
+            return []
+        return self._item_added(item)
+
+    def _harvest_output(self, output: list) -> list[bytes]:
+        """Catch function_call items that never streamed argument deltas."""
+        events: list[bytes] = []
+        for item in output or []:
+            if not isinstance(item, dict) or item.get("type") != "function_call":
+                continue
+            call_id = item.get("call_id") or item.get("id") or ""
+            acc = self.tools.get(call_id) if call_id else None
+            if acc and acc.get("started"):
+                continue
+            events.extend(self._item_added(item))
+        return events
+
+    def _acc_for(self, chunk: dict) -> dict[str, Any]:
+        item_id = chunk.get("item_id") or ""
+        call_id = chunk.get("call_id") or self.ids.get(item_id) or item_id
+        if item_id and call_id:
+            self.ids[item_id] = call_id
+        return self._named(call_id)
+
+    def _named(self, key: str) -> dict[str, Any]:
+        key = key or f"anon{len(self.order)}"
+        acc = self.tools.get(key)
+        if acc is None:
+            acc = {"id": key, "name": "", "args": "", "started": False}
+            self.tools[key] = acc
+            self.order.append(key)
+        if not acc["id"]:
+            acc["id"] = key
+        return acc
+
+
+def _sse_payload(event: str, buf: list[str]) -> str:
+    payload = "\n".join(buf)
+    if event and payload and payload.strip() != "[DONE]":
+        try:
+            obj = json.loads(payload)
+            if isinstance(obj, dict) and not obj.get("type"):
+                obj["type"] = event
+                return json.dumps(obj, separators=(",", ":"))
+        except json.JSONDecodeError:
+            pass
+    return payload
+
+
+def read_sse_data(resp) -> Iterable[str]:
+    """Yield SSE data payloads. Prefer JSON `type`; fall back to `event:`."""
+    buf: list[str] = []
+    event = ""
+    while True:
+        raw = resp.readline()
+        if not raw:
+            if buf:
+                yield _sse_payload(event, buf)
+            return
+        line = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if line == "":
+            if buf:
+                yield _sse_payload(event, buf)
+                buf = []
+            event = ""
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            continue
+        if line.startswith("data:"):
+            buf.append(line[5:].lstrip())
+
+
 def _j(obj: Any) -> bytes:
     return json.dumps(obj, separators=(",", ":")).encode()
 
@@ -618,11 +1037,45 @@ def write_sse(event: bytes) -> bytes:
 # upstream HTTP
 # ---------------------------------------------------------------------------
 
+class _BufferedResp:
+    """Replay a body we already consumed (fallback / error path)."""
+
+    def __init__(self, code: int, body: bytes, ctype: str = "application/json"):
+        self.status = code
+        self.code = code
+        self.headers = {"Content-Type": ctype}
+        self._body = body
+
+    def read(self, n: int = -1) -> bytes:
+        return self._body
+
+    def readline(self, n: int = -1) -> bytes:
+        return b""
+
+    def close(self) -> None:
+        return None
+
+
 class Upstream:
-    def __init__(self, base_url: str, api_key: str, timeout: int = 600) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: int = 600,
+        api: str = "auto",
+        provider_id: str = "",
+    ) -> None:
         self.base = (base_url or "").rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.api = api or "auto"  # auto | chat | responses
+        self.provider_id = provider_id or provider_id_for(base_url)
+        self._force_chat = False
+
+    def use_responses(self) -> bool:
+        if self._force_chat:
+            return False
+        return effective_api(self.provider_id, self.api) == "responses"
 
     def models(self):
         return self._do("GET", self.base + "/models", None, False, timeout=30)
@@ -630,6 +1083,36 @@ class Upstream:
     def chat(self, req: dict):
         body = json.dumps(req).encode()
         return self._do("POST", self.base + "/chat/completions", body, bool(req.get("stream")))
+
+    def responses(self, req: dict):
+        body = json.dumps(req).encode()
+        return self._do("POST", self.base + "/responses", body, bool(req.get("stream")))
+
+    def complete(self, chat_req: dict, responses_req: dict):
+        """POST /responses or /chat/completions. Auto falls back to chat on 404."""
+        if not self.use_responses():
+            return self.chat(chat_req), False
+        if not responses_req:
+            responses_req = responses_from_chat(chat_req)
+        resp = self.responses(responses_req)
+        code = getattr(resp, "status", None) or getattr(resp, "code", 200)
+        if self.api == "auto" and code != 200:
+            peek = b""
+            try:
+                peek = resp.read()
+            except Exception:
+                peek = b""
+            try:
+                resp.close()
+            except Exception:
+                pass
+            if should_fallback_to_chat(code, peek):
+                self._force_chat = True
+                sys.stderr.write("fxs-gateway: /responses missing — falling back to /chat/completions\n")
+                return self.chat(chat_req), False
+            # Not a fallback case (401, 400-invalid-body, …): re-wrap the body.
+            return _BufferedResp(code, peek), True
+        return resp, True
 
     def _do(self, method: str, url: str, body: Optional[bytes], stream: bool, timeout: Optional[int] = None):
         headers = {"User-Agent": USER_AGENT}
@@ -743,13 +1226,22 @@ class GatewayHandler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n) if n else b"{}"
         try:
-            req = chat_request(model, stream, raw)
+            chat_req = chat_request(model, stream, raw)
         except TranslateError as e:
             self._json(400, {"error": str(e)})
             return
         up: Upstream = self.server.upstream  # type: ignore[attr-defined]
+        resp_req = responses_from_chat(chat_req) if up.use_responses() else {}
         try:
-            resp = up.chat(req)
+            inbound = json.loads(raw.decode() if raw else b"{}")
+        except json.JSONDecodeError:
+            inbound = {}
+        if resp_req:
+            reasoning = _responses_reasoning(inbound if isinstance(inbound, dict) else {})
+            if reasoning:
+                resp_req["reasoning"] = reasoning
+        try:
+            resp, used_responses = up.complete(chat_req, resp_req)
         except Exception as e:
             self._json(502, {"error": str(e)})
             return
@@ -757,12 +1249,17 @@ class GatewayHandler(BaseHTTPRequestHandler):
             code = getattr(resp, "status", None) or getattr(resp, "code", 200)
             if code != 200:
                 body = resp.read()
-                ctype = resp.headers.get("Content-Type") or "application/json"
-                self._send(code, body, ctype)
+                ctype = resp.headers.get("Content-Type") if hasattr(resp.headers, "get") else "application/json"
+                self._send(code, body, ctype or "application/json")
                 return
             if not stream:
                 body = resp.read()
-                ctype = resp.headers.get("Content-Type") or "application/json"
+                if used_responses:
+                    try:
+                        body = responses_to_chat(body)
+                    except Exception:
+                        pass
+                ctype = "application/json"
                 self._send(200, body, ctype)
                 return
             try:
@@ -773,17 +1270,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.end_headers()
             except (BrokenPipeError, ConnectionResetError):
                 return
-            conv = Stream()
+            conv: Stream = ResponseStream() if used_responses else Stream()
             try:
-                while True:
-                    line = resp.readline()
-                    if not line:
-                        break
-                    line = line.decode("utf-8", "replace").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
+                for data in read_sse_data(resp):
+                    if data.strip() == "[DONE]":
                         break
                     self._write_events(conv.consume(data))
                 self._write_events(conv.close())
@@ -818,11 +1308,20 @@ class GatewayServer(ThreadingHTTPServer):
         self.listen = listen
 
 
-def serve(listen: str, base_url: str, api_key: str) -> None:
+def serve(listen: str, base_url: str, api_key: str, api: str = "auto") -> None:
     require_loopback(listen)
     key = api_key or "ollama"
-    srv = GatewayServer(listen, Upstream(base_url, key))
-    sys.stderr.write(f"fxs-gateway: http://{listen}  →  {base_url.rstrip('/')}\n")
+    pid = provider_id_for(base_url)
+    try:
+        api = normalize_api(api)
+    except ValueError:
+        api = "auto"
+    mode = effective_api(pid, api)
+    srv = GatewayServer(
+        listen,
+        Upstream(base_url, key, api=api, provider_id=pid),
+    )
+    sys.stderr.write(f"fxs-gateway: http://{listen}  →  {base_url.rstrip('/')}  [{mode}]\n")
     for line in print_env(listen).strip().splitlines():
         sys.stderr.write("fxs-gateway:   " + line + "\n")
     try:
@@ -898,26 +1397,43 @@ def stop_gateway(listen: str = LISTEN_DEFAULT) -> None:
         pass
 
 
+def _gateway_stamp(upstream: str, api: str) -> str:
+    return f"{upstream.rstrip('/')}\n{api}\n"
+
+
+def _stamp_matches(text: str, upstream: str, api: str) -> bool:
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return False
+    return lines[0].rstrip("/") == upstream.rstrip("/") and lines[1] == api
+
+
 def ensure_gateway(
     listen: str = LISTEN_DEFAULT,
     upstream: str = "",
     api_key: str = "",
     script: Optional[Path] = None,
+    api: str = "",
 ) -> dict[str, str]:
     """Start the translator if needed. Safe to call from fx / fxs / the UI."""
     load_env_file()
     upstream = (upstream or configured_upstream()).rstrip("/")
     if not upstream:
         return {"enabled": "0"}
+    try:
+        api = normalize_api(api or configured_api())
+    except ValueError:
+        api = "auto"
     api_key = api_key or api_key_from_env() or "ollama"
+    stamp = _gateway_stamp(upstream, api)
     if healthz_ok(listen):
         want = ""
         if UPSTREAM_STAMP.is_file():
             try:
-                want = UPSTREAM_STAMP.read_text(encoding="utf-8").strip()
+                want = UPSTREAM_STAMP.read_text(encoding="utf-8")
             except OSError:
                 want = ""
-        if want in ("", upstream):
+        if _stamp_matches(want, upstream, api):
             os.environ["FX_GATEWAY_BASE_URL"] = "http://" + listen
             os.environ["FX_GATEWAY_CHAT_URL"] = "http://" + listen + "/v3/ai/language-model"
             os.environ.setdefault("AI_GATEWAY_API_KEY", "local")
@@ -925,6 +1441,7 @@ def ensure_gateway(
                 "enabled": "1",
                 "listen": listen,
                 "upstream": upstream,
+                "api": api,
                 "env": print_env(listen),
             }
         stop_gateway(listen)
@@ -937,9 +1454,10 @@ def ensure_gateway(
     env["OPENAI_API_KEY"] = api_key
     env["OPENAI_BASE_URL"] = upstream
     env["FX_UPSTREAM"] = upstream
+    env["FX_UPSTREAM_API"] = api
     logf = open(LOG_FILE, "ab", buffering=0)
     proc = subprocess.Popen(
-        [sys.executable, str(script), "--listen", listen, "--upstream", upstream],
+        [sys.executable, str(script), "--listen", listen, "--upstream", upstream, "--api", api],
         stdin=subprocess.DEVNULL,
         stdout=logf,
         stderr=subprocess.STDOUT,
@@ -956,7 +1474,7 @@ def ensure_gateway(
         os.chmod(PID_FILE, 0o600)
     except OSError:
         pass
-    UPSTREAM_STAMP.write_text(upstream + "\n", encoding="utf-8")
+    UPSTREAM_STAMP.write_text(stamp, encoding="utf-8")
     deadline = time.time() + 4.0
     while time.time() < deadline:
         if healthz_ok(listen):
@@ -973,6 +1491,7 @@ def ensure_gateway(
         "enabled": "1",
         "listen": listen,
         "upstream": upstream,
+        "api": api,
         "env": print_env(listen),
     }
 
@@ -1007,11 +1526,13 @@ def store_api_key(key: str) -> dict[str, Any]:
             "OPENAI_API_KEY": None,
             "FX_UPSTREAM": None,
             "OPENAI_BASE_URL": None,
+            "FX_UPSTREAM_API": None,
         })
         os.environ["AI_GATEWAY_API_KEY"] = key
         os.environ.pop("OPENAI_API_KEY", None)
         os.environ.pop("FX_UPSTREAM", None)
         os.environ.pop("OPENAI_BASE_URL", None)
+        os.environ.pop("FX_UPSTREAM_API", None)
         stop_gateway()
     else:
         updates: dict[str, Optional[str]] = {
@@ -1035,7 +1556,7 @@ def store_api_key(key: str) -> dict[str, Any]:
     return out
 
 
-def apply_provider(name_or_url: str, model: str = "") -> dict[str, Any]:
+def apply_provider(name_or_url: str, model: str = "", api: str = "") -> dict[str, Any]:
     spec = resolve_provider(name_or_url)
     load_env_file()
     current_model = os.environ.get("FX_MODEL", "")
@@ -1048,10 +1569,13 @@ def apply_provider(name_or_url: str, model: str = "") -> dict[str, Any]:
         key = current.get("AI_GATEWAY_API_KEY", "")
         if not key or key.startswith("vck_"):
             updates["AI_GATEWAY_API_KEY"] = "local"
+        if api:
+            updates["FX_UPSTREAM_API"] = normalize_api(api)
     else:
         current = parse_env_file()
         if current.get("AI_GATEWAY_API_KEY") == "local":
             updates["AI_GATEWAY_API_KEY"] = None
+        updates["FX_UPSTREAM_API"] = None
     picked = (model or "").strip() or suggest_model(spec["id"], current_model)
     if picked:
         updates["FX_MODEL"] = picked
@@ -1067,7 +1591,7 @@ def apply_provider(name_or_url: str, model: str = "") -> dict[str, Any]:
         probe = False
     if probe:
         try:
-            ensure_gateway(upstream=spec["url"])
+            ensure_gateway(upstream=spec["url"], api=api or configured_api())
             catalog = fetch_catalog()
             if catalog:
                 refined = suggest_model(spec["id"], os.environ.get("FX_MODEL", picked), catalog)
@@ -1093,15 +1617,19 @@ def _usage() -> str:
     return """fxs-gateway — fx Gateway protocol → OpenAI-compatible /v1
 
 Usage:
-  fxs-gateway [--listen 127.0.0.1:18787] [--upstream URL]
+  fxs-gateway [--listen 127.0.0.1:18787] [--upstream URL] [--api auto|chat|responses]
   fxs-gateway --ensure [--print-env]
-  fxs-gateway --apply xai [--model grok-4]
+  fxs-gateway --apply xai [--model grok-4] [--api responses]
   fxs-gateway --print-env
   fxs-gateway --stop
 
 fx will not send traffic off loopback. Point FX_UPSTREAM at the provider
 (/v1) and let this process sit on 127.0.0.1. `fxs provider xai` starts it
 and picks a model that host actually lists.
+
+OpenAI and xAI default to POST /v1/responses (reasoning, tool items,
+store=false). Everyone else stays on /v1/chat/completions. Auto falls
+back if /responses is missing. Override with --api or FX_UPSTREAM_API.
 """
 
 
@@ -1109,6 +1637,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     listen = LISTEN_DEFAULT
     upstream = ""
+    cli_api = ""
     do_print = False
     do_ensure = False
     do_stop = False
@@ -1125,6 +1654,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             listen = argv[i + 1]; i += 2; continue
         if a in ("--upstream", "-upstream") and i + 1 < len(argv):
             upstream = argv[i + 1]; i += 2; continue
+        if a in ("--api", "-api") and i + 1 < len(argv):
+            cli_api = argv[i + 1]; i += 2; continue
         if a in ("--print-env", "-print-env"):
             do_print = True; i += 1; continue
         if a == "--ensure":
@@ -1143,12 +1674,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
     load_env_file()
     upstream = (upstream or configured_upstream() or os.environ.get("OPENAI_BASE_URL") or "").rstrip("/")
+    if cli_api:
+        try:
+            cli_api = normalize_api(cli_api)
+        except ValueError as e:
+            sys.stderr.write(f"fxs-gateway: {e}\n")
+            return 2
     if do_howto:
         sys.stdout.write(_usage())
         return 0
     if do_apply:
         try:
-            info = apply_provider(do_apply, apply_model)
+            info = apply_provider(do_apply, apply_model, api=cli_api)
         except ValueError as e:
             sys.stderr.write(f"fxs-gateway: {e}\n")
             return 2
@@ -1161,7 +1698,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not upstream:
             return 0
         try:
-            info = ensure_gateway(listen=listen, upstream=upstream)
+            info = ensure_gateway(listen=listen, upstream=upstream, api=cli_api)
         except Exception as e:
             sys.stderr.write(f"fxs-gateway: {e}\n")
             return 1
@@ -1178,7 +1715,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not key:
         key = "ollama"
         sys.stderr.write("fxs-gateway: no OPENAI_API_KEY; using dummy key \"ollama\"\n")
-    serve(listen, upstream, key)
+    serve(listen, upstream, key, api=cli_api or configured_api())
     return 0
 
 

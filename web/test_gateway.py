@@ -518,7 +518,7 @@ class IsolatedApply(unittest.TestCase):
             "FX_UPSTREAM", "OPENAI_BASE_URL", "OPENAI_API_KEY", "FX_MODEL",
             "AI_GATEWAY_API_KEY", "FXS_UI_LOCAL", "OLLAMA_API_KEY",
             "XAI_API_KEY", "GROQ_API_KEY", "FX_GATEWAY_BASE_URL",
-            "FX_GATEWAY_CHAT_URL",
+            "FX_GATEWAY_CHAT_URL", "FX_UPSTREAM_API",
         ):
             self.prev_env[k] = os.environ.pop(k, None)
         os.environ["FXS_UI_LOCAL"] = "1"
@@ -547,6 +547,15 @@ class IsolatedApply(unittest.TestCase):
         self.assertEqual(saved["FX_UPSTREAM"], "https://api.x.ai/v1")
         self.assertEqual(saved["FX_MODEL"], "grok-4")
         self.assertEqual(saved["AI_GATEWAY_API_KEY"], "local")
+        self.assertEqual(out["api"], "auto")
+        self.assertEqual(out["effective_api"], "responses")
+
+    def test_apply_xai_api_chat(self):
+        out = gateway.apply_provider("xai", api="chat")
+        self.assertEqual(out["api"], "chat")
+        self.assertEqual(out["effective_api"], "chat")
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["FX_UPSTREAM_API"], "chat")
 
     def test_apply_vercel_clears_upstream(self):
         gateway.apply_provider("xai")
@@ -555,6 +564,7 @@ class IsolatedApply(unittest.TestCase):
         self.assertFalse(out["url"])
         saved = gateway.parse_env_file(gateway.ENV_FILE)
         self.assertNotIn("FX_UPSTREAM", saved)
+        self.assertNotIn("FX_UPSTREAM_API", saved)
         self.assertEqual(saved["FX_MODEL"], "zai/glm-5.2")
 
     def test_apply_custom_url_appends_v1(self):
@@ -609,6 +619,390 @@ class IsolatedApply(unittest.TestCase):
         self.assertEqual(info["id"], "ollama")
         self.assertEqual(info["url"], "http://127.0.0.1:11434/v1")
         self.assertFalse(info["needs_key"])
+        self.assertEqual(info["effective_api"], "chat")
+
+    def test_cli_apply_api(self):
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = gateway.main(["--apply", "openai", "--api", "responses"])
+        self.assertEqual(rc, 0)
+        info = json.loads(buf.getvalue())
+        self.assertEqual(info["id"], "openai")
+        self.assertEqual(info["api"], "responses")
+        self.assertEqual(info["effective_api"], "responses")
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["FX_UPSTREAM_API"], "responses")
+
+
+class ApiMode(unittest.TestCase):
+    def test_normalize(self):
+        self.assertEqual(gateway.normalize_api("auto"), "auto")
+        self.assertEqual(gateway.normalize_api("CHAT"), "chat")
+        self.assertEqual(gateway.normalize_api("completions"), "chat")
+        self.assertEqual(gateway.normalize_api("responses"), "responses")
+        self.assertEqual(gateway.normalize_api("/v1/responses"), "responses")
+        with self.assertRaises(ValueError):
+            gateway.normalize_api("grpc")
+
+    def test_effective_defaults(self):
+        self.assertEqual(gateway.effective_api("openai", "auto"), "responses")
+        self.assertEqual(gateway.effective_api("xai", "auto"), "responses")
+        self.assertEqual(gateway.effective_api("ollama", "auto"), "chat")
+        self.assertEqual(gateway.effective_api("groq", "auto"), "chat")
+        self.assertEqual(gateway.effective_api("openai", "chat"), "chat")
+        self.assertEqual(gateway.effective_api("ollama", "responses"), "responses")
+
+    def test_fallback_codes(self):
+        self.assertTrue(gateway.should_fallback_to_chat(404))
+        self.assertTrue(gateway.should_fallback_to_chat(405))
+        self.assertTrue(gateway.should_fallback_to_chat(501))
+        self.assertFalse(gateway.should_fallback_to_chat(401))
+        self.assertFalse(gateway.should_fallback_to_chat(500))
+        self.assertTrue(gateway.should_fallback_to_chat(400, b'{"error":"Unknown request URL"}'))
+        self.assertTrue(gateway.should_fallback_to_chat(400, b"does not support /responses"))
+        self.assertFalse(gateway.should_fallback_to_chat(400, b'{"error":"invalid model"}'))
+
+
+class ResponsesTranslate(unittest.TestCase):
+    def test_basic_prompt_and_store_false(self):
+        req = gateway.responses_request("grok-4", True, json.dumps({
+            "prompt": [
+                {"role": "system", "content": "you are a tool"},
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+            ],
+            "maxOutputTokens": 128,
+            "reasoning": "high",
+        }).encode())
+        self.assertEqual(req["model"], "grok-4")
+        self.assertTrue(req["stream"])
+        self.assertIs(req["store"], False)
+        self.assertEqual(req["max_output_tokens"], 128)
+        self.assertEqual(req["reasoning"], {"effort": "high"})
+        self.assertEqual(req["input"][0], {"role": "system", "content": "you are a tool"})
+        self.assertEqual(req["input"][1], {"role": "user", "content": "hello"})
+        self.assertNotIn("messages", req)
+
+    def test_tools_flattened_and_history(self):
+        req = gateway.responses_request("m", False, json.dumps({
+            "prompt": [
+                {"role": "user", "content": [{"type": "text", "text": "list"}]},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "ok"},
+                    {"type": "tool-call", "toolCallId": "c1", "toolName": "bash",
+                     "input": {"command": "ls"}},
+                ]},
+                {"role": "tool", "content": [
+                    {"type": "tool-result", "toolCallId": "c1", "toolName": "bash",
+                     "output": {"type": "text", "value": "a.txt"}},
+                ]},
+            ],
+            "tools": [{"type": "function", "name": "bash", "description": "run",
+                       "inputSchema": {"type": "object", "properties": {"command": {"type": "string"}}}}],
+            "toolChoice": {"type": "required"},
+        }).encode())
+        self.assertEqual(req["tools"][0], {
+            "type": "function",
+            "name": "bash",
+            "description": "run",
+            "parameters": {"type": "object", "properties": {"command": {"type": "string"}}},
+        })
+        self.assertNotIn("function", req["tools"][0])
+        self.assertEqual(req["tool_choice"], "required")
+        kinds = [i.get("type") or i.get("role") for i in req["input"]]
+        self.assertEqual(kinds, ["user", "assistant", "function_call", "function_call_output"])
+        self.assertEqual(req["input"][2]["call_id"], "c1")
+        self.assertEqual(req["input"][2]["name"], "bash")
+        self.assertEqual(req["input"][3]["output"], "a.txt")
+
+    def test_to_chat_text(self):
+        raw = json.dumps({
+            "status": "completed",
+            "output": [{"type": "message", "content": [
+                {"type": "output_text", "text": "pong"},
+            ]}],
+            "usage": {"input_tokens": 4, "output_tokens": 1},
+        }).encode()
+        out = json.loads(gateway.responses_to_chat(raw))
+        self.assertEqual(out["choices"][0]["message"]["content"], "pong")
+        self.assertEqual(out["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(out["usage"]["prompt_tokens"], 4)
+
+    def test_to_chat_tools(self):
+        raw = {
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "call_id": "c1",
+                "name": "bash",
+                "arguments": '{"command":"ls"}',
+            }],
+        }
+        out = json.loads(gateway.responses_to_chat(raw))
+        msg = out["choices"][0]["message"]
+        self.assertEqual(out["choices"][0]["finish_reason"], "tool_calls")
+        self.assertEqual(msg["tool_calls"][0]["id"], "c1")
+        self.assertEqual(msg["tool_calls"][0]["function"]["name"], "bash")
+
+    def test_to_chat_output_text_fallback(self):
+        out = json.loads(gateway.responses_to_chat({"output_text": "hi", "output": []}))
+        self.assertEqual(out["choices"][0]["message"]["content"], "hi")
+
+    def test_incomplete_length(self):
+        out = json.loads(gateway.responses_to_chat({
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "cut"}]}],
+        }))
+        self.assertEqual(out["choices"][0]["finish_reason"], "length")
+
+
+class ResponseSSE(unittest.TestCase):
+    def test_text_and_completed(self):
+        s = gateway.ResponseStream()
+        got = []
+        got += s.consume(b'{"type":"response.output_text.delta","delta":"Hel"}')
+        got += s.consume(b'{"type":"response.output_text.delta","delta":"lo"}')
+        got += s.consume(json.dumps({
+            "type": "response.completed",
+            "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 2}},
+        }))
+        self.assertEqual(s.close(), [])
+        types = [json.loads(e)["type"] for e in got]
+        self.assertEqual(types, ["text-delta", "text-delta", "finish"])
+        self.assertEqual(json.loads(got[0])["delta"], "Hel")
+        self.assertEqual(json.loads(got[2])["finishReason"]["unified"], "stop")
+        self.assertEqual(json.loads(got[2])["usage"]["inputTokens"]["total"], 3)
+
+    def test_tool_call_deltas(self):
+        s = gateway.ResponseStream()
+        got = []
+        got += s.consume(json.dumps({
+            "type": "response.output_item.added",
+            "item": {"id": "fc_1", "type": "function_call", "call_id": "c1", "name": "bash", "arguments": ""},
+        }))
+        got += s.consume(json.dumps({
+            "type": "response.function_call_arguments.delta",
+            "item_id": "fc_1", "call_id": "c1", "delta": '{"command":',
+        }))
+        got += s.consume(json.dumps({
+            "type": "response.function_call_arguments.delta",
+            "item_id": "fc_1", "delta": '"ls"}',
+        }))
+        got += s.consume(json.dumps({
+            "type": "response.completed",
+            "response": {"status": "completed", "output": []},
+        }))
+        types = [json.loads(e)["type"] for e in got]
+        self.assertEqual(types, [
+            "tool-input-start", "tool-input-delta", "tool-input-delta",
+            "tool-input-end", "tool-call", "finish",
+        ])
+        call = json.loads(got[4])
+        self.assertEqual(call["toolCallId"], "c1")
+        self.assertEqual(call["input"], {"command": "ls"})
+        self.assertEqual(json.loads(got[5])["finishReason"]["unified"], "tool-calls")
+
+    def test_harvest_function_call_on_completed(self):
+        s = gateway.ResponseStream()
+        got = s.consume(json.dumps({
+            "type": "response.completed",
+            "response": {
+                "status": "completed",
+                "output": [{
+                    "type": "function_call",
+                    "call_id": "c9",
+                    "name": "bash",
+                    "arguments": '{"command":"pwd"}',
+                }],
+            },
+        }))
+        types = [json.loads(e)["type"] for e in got]
+        self.assertEqual(types, [
+            "tool-input-start", "tool-input-delta", "tool-input-end", "tool-call", "finish",
+        ])
+        self.assertEqual(json.loads(got[3])["input"], {"command": "pwd"})
+
+    def test_reasoning_delta(self):
+        s = gateway.ResponseStream()
+        got = s.consume(b'{"type":"response.reasoning_summary_text.delta","delta":"hmm"}')
+        self.assertEqual(json.loads(got[0])["type"], "reasoning-delta")
+        self.assertEqual(json.loads(got[0])["delta"], "hmm")
+
+    def test_read_sse_injects_event_type(self):
+        class Fake:
+            def __init__(self):
+                raw = (
+                    b"event: response.output_text.delta\n"
+                    b"data: {\"delta\":\"Hi\"}\n"
+                    b"\n"
+                    b"event: response.completed\n"
+                    b"data: {\"response\":{\"status\":\"completed\"}}\n"
+                    b"\n"
+                )
+                self._buf = io.BytesIO(raw)
+
+            def readline(self):
+                return self._buf.readline()
+
+        payloads = list(gateway.read_sse_data(Fake()))
+        self.assertEqual(json.loads(payloads[0])["type"], "response.output_text.delta")
+        self.assertEqual(json.loads(payloads[0])["delta"], "Hi")
+        self.assertEqual(json.loads(payloads[1])["type"], "response.completed")
+
+
+class ResponsesHTTP(unittest.TestCase):
+    def _serve(self, handler, api="responses", provider_id="openai"):
+        up = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        t = threading.Thread(target=up.serve_forever, daemon=True)
+        t.start()
+        gw = gateway.GatewayServer(
+            "127.0.0.1:0",
+            gateway.Upstream(
+                f"http://127.0.0.1:{up.server_address[1]}/v1",
+                "k",
+                api=api,
+                provider_id=provider_id,
+            ),
+        )
+        gt = threading.Thread(target=gw.serve_forever, daemon=True)
+        gt.start()
+        return up, t, gw, gt
+
+    def _stop(self, up, t, gw, gt):
+        gw.shutdown(); up.shutdown()
+        gw.server_close(); up.server_close()
+        gt.join(timeout=1); t.join(timeout=1)
+
+    def test_stream_uses_responses(self):
+        saw = {"path": "", "body": None}
+
+        class Up(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                return
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                saw["path"] = self.path
+                saw["body"] = json.loads(self.rfile.read(n) or b"{}")
+                payload = (
+                    b"event: response.output_text.delta\n"
+                    b'data: {"type":"response.output_text.delta","delta":"Hi"}\n\n'
+                    b"event: response.completed\n"
+                    b'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        up, t, gw, gt = self._serve(Up)
+        try:
+            body = json.dumps({"prompt": [{"role": "user", "content": "hi"}]}).encode()
+            req = Request(
+                f"http://127.0.0.1:{gw.server_address[1]}/v3/ai/language-model",
+                data=body, method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            req.add_header("ai-language-model-id", "grok-4")
+            req.add_header("ai-language-model-streaming", "true")
+            r = urlopen(req, timeout=2)
+            text = r.read().decode()
+            self.assertEqual(saw["path"], "/v1/responses")
+            self.assertIs(saw["body"]["store"], False)
+            self.assertEqual(saw["body"]["model"], "grok-4")
+            self.assertIn("text-delta", text)
+            self.assertIn("Hi", text)
+            self.assertIn("finish", text)
+            self.assertNotIn("choices", text)
+        finally:
+            self._stop(up, t, gw, gt)
+
+    def test_nonstream_rewritten_to_chat(self):
+        class Up(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                return
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(n)
+                body = json.dumps({
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [
+                        {"type": "output_text", "text": "pong"},
+                    ]}],
+                }).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        up, t, gw, gt = self._serve(Up)
+        try:
+            body = json.dumps({"prompt": [{"role": "user", "content": "ping"}]}).encode()
+            req = Request(
+                f"http://127.0.0.1:{gw.server_address[1]}/v3/ai/language-model",
+                data=body, method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            req.add_header("ai-language-model-id", "any/id")
+            req.add_header("ai-language-model-streaming", "false")
+            r = urlopen(req, timeout=2)
+            out = json.loads(r.read())
+            self.assertEqual(out["choices"][0]["message"]["content"], "pong")
+        finally:
+            self._stop(up, t, gw, gt)
+
+    def test_auto_falls_back_on_404(self):
+        saw = []
+
+        class Up(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                return
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(n)
+                saw.append(self.path)
+                if self.path.endswith("/responses"):
+                    body = b'{"error":"Unknown request URL"}'
+                    self.send_response(404)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                payload = (
+                    b'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'
+                    b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        up, t, gw, gt = self._serve(Up, api="auto", provider_id="openai")
+        try:
+            body = json.dumps({"prompt": [{"role": "user", "content": "hi"}]}).encode()
+            req = Request(
+                f"http://127.0.0.1:{gw.server_address[1]}/v3/ai/language-model",
+                data=body, method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            req.add_header("ai-language-model-id", "gpt-4o")
+            req.add_header("ai-language-model-streaming", "true")
+            r = urlopen(req, timeout=2)
+            text = r.read().decode()
+            self.assertEqual(saw, ["/v1/responses", "/v1/chat/completions"])
+            self.assertIn("text-delta", text)
+            self.assertIn("Hi", text)
+        finally:
+            self._stop(up, t, gw, gt)
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ If Docker is missing, idle, or you are root, `fxs` falls through to native `fx`.
 | `fxs build` | Build `fx-sandbox:latest` |
 | `fxs status` | Binary, key, Docker, image, PATH |
 | `fxs key` | (Re)prompt for a Vercel or OpenAI-compatible key |
-| `fxs provider` | `vercel` / `openai` / `xai` / `openrouter` / `ollama` / a `/v1` URL |
+| `fxs provider` | `vercel` / `openai` / `xai` / `openrouter` / `ollama` / a `/v1` URL (`--api auto\|chat\|responses`) |
 | `fxs unpack [dir]` | Write Dockerfile / compose out |
 | `fxs uninstall` | Remove the CLI and kit (`-y` to skip confirm) |
 | `fxs install` | Re-run the installer |
@@ -159,7 +159,14 @@ or any `https://…/v1` URL.
 fxs provider ollama              # http://127.0.0.1:11434/v1 — no key
 fxs provider https://host:8000/v1
 fxs provider xai --model grok-3  # override the default id
+fxs provider xai --api chat      # force Chat Completions
 ```
+
+OpenAI and xAI use the Responses API (`/v1/responses`) by default —
+reasoning and tool items, prompts not stored (`store: false`). Everything
+else stays on Chat Completions. Auto falls back if `/responses` is
+missing. Override with `--api auto|chat|responses` or
+`FX_UPSTREAM_API`.
 
 Inside Docker, host loopback is rewritten to `host.docker.internal`
 so a laptop Ollama is still reachable. Rebuild once (`fxs build`) so
@@ -171,6 +178,7 @@ Same env file as the Vercel key:
 export FX_UPSTREAM=https://api.x.ai/v1
 export OPENAI_API_KEY=xai-…
 export FX_MODEL=grok-4
+# export FX_UPSTREAM_API=responses   # auto | chat | responses
 ```
 
 ## Sandbox

@@ -92,6 +92,7 @@ else
     warn "Rebuild the image: fxs build"
   else
     python3 "$_gw_py" --listen "$_gw_listen" --upstream "$_up" \
+      --api "${FX_UPSTREAM_API:-auto}" \
       >/tmp/fx-gateway.log 2>&1 &
     _i=0
     while [[ $_i -lt 40 ]]; do

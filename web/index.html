@@ -180,6 +180,14 @@
         <span class="cell-k">Upstream</span>
         <input id="provider-url" type="text" spellcheck="false" placeholder="https://host/v1" autocomplete="off">
       </label>
+      <div class="cell" id="api-row" hidden>
+        <span class="cell-k">API</span>
+        <div class="seg" id="api-seg" role="radiogroup" aria-label="API">
+          <button type="button" data-api="auto" title="Responses on OpenAI and xAI, Chat elsewhere">Auto</button>
+          <button type="button" data-api="chat" title="Chat Completions">Chat</button>
+          <button type="button" data-api="responses" title="Responses — reasoning and tool items">Responses</button>
+        </div>
+      </div>
       <button type="button" class="cell" id="model-row">
         <span class="cell-k">Model</span>
         <span class="cell-v" id="model-val">GLM 5.2</span>
@@ -221,6 +229,10 @@
       <div class="cell">
         <span class="cell-k">Provider</span>
         <span class="cell-v mono" id="diag-provider"></span>
+      </div>
+      <div class="cell">
+        <span class="cell-k">API</span>
+        <span class="cell-v mono" id="diag-api"></span>
       </div>
       <div class="cell">
         <span class="cell-k">Model id</span>

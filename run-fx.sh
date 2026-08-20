@@ -230,6 +230,7 @@ load_fx_env() {
     local had_up="${FX_UPSTREAM-}"
     local had_oai="${OPENAI_API_KEY-}"
     local had_base="${OPENAI_BASE_URL-}"
+    local had_api="${FX_UPSTREAM_API-}"
     set -a
     # shellcheck disable=SC1090
     . "${HOME}/.config/fx/env"
@@ -238,6 +239,7 @@ load_fx_env() {
     [[ -n "$had_up" ]] && FX_UPSTREAM="$had_up"
     [[ -n "$had_oai" ]] && OPENAI_API_KEY="$had_oai"
     [[ -n "$had_base" ]] && OPENAI_BASE_URL="$had_base"
+    [[ -n "$had_api" ]] && FX_UPSTREAM_API="$had_api"
   fi
 }
 
@@ -451,6 +453,9 @@ _up="$(openai_upstream)"
 if [[ -n "$_up" ]]; then
   _up="$(rewrite_upstream_for_docker "$_up")"
   DOCKER_ARGS+=(-e "FX_UPSTREAM=${_up}" -e "OPENAI_BASE_URL=${_up}")
+  if [[ -n "${FX_UPSTREAM_API:-}" ]]; then
+    DOCKER_ARGS+=(-e "FX_UPSTREAM_API")
+  fi
   log "openai upstream=${_up} (loopback translator inside the box)"
 fi
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then

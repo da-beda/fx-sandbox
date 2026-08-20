@@ -71,6 +71,7 @@
     kind: "",
     provider: "",
     providerLabel: "",
+    api: "auto",
   };
   if (localStorage.getItem("fxs.yolo") === "0" && !localStorage.getItem("fxs.perm")) {
     state.perm = "auto";
@@ -1083,6 +1084,7 @@
       set("diag-backend", "unreachable");
       set("diag-model", "—");
       set("diag-provider", "—");
+      set("diag-api", "—");
       set("diag-session", state.resume || "—");
       set("diag-docker", "—");
       set("diag-bins", "—");
@@ -1092,9 +1094,18 @@
     set("diag-model", s.model || state.model || "—");
     const p = s.provider || {};
     set("diag-provider", p.url || p.label || "Vercel AI Gateway");
+    if (p.vercel || !p.url) {
+      set("diag-api", "Vercel");
+    } else if (p.api === "auto" && p.effective_api && p.effective_api !== p.api) {
+      set("diag-api", "auto → " + p.effective_api);
+    } else {
+      set("diag-api", p.effective_api || p.api || "—");
+    }
     if ($("provider-val")) $("provider-val").textContent = p.label || "Vercel";
     state.provider = p.id || "";
     state.providerLabel = p.label || "";
+    state.api = p.api && p.api !== "vercel" ? p.api : "auto";
+    paintApi(p);
     const urlRow = $("provider-url-row");
     if (urlRow) {
       urlRow.hidden = !p.url || p.id !== "custom";
@@ -1130,6 +1141,8 @@
       "fxs",
       "backend: " + (s.backend || "unknown"),
       "model: " + (s.model || state.model || "—"),
+      "provider: " + ((s.provider && (s.provider.url || s.provider.label)) || "—"),
+      "api: " + ((s.provider && (s.provider.effective_api || s.provider.api)) || "—"),
       "key: " + (s.key === true ? "set" : s.key === false ? "missing" : "—"),
       "workspace: " + (state.workspace || "—"),
       "session: " + (state.resume || "—"),
@@ -1292,6 +1305,45 @@
       if (row) row.hidden = false;
       if (inp) inp.focus();
     }
+    paintApi(data);
+    return data;
+  }
+
+  function paintApi(p) {
+    const row = $("api-row");
+    if (!row) return;
+    const vercel = !p || p.vercel || !p.url || p.api === "vercel";
+    row.hidden = vercel;
+    const mode = vercel || !p.api ? "auto" : p.api;
+    state.api = mode;
+    document.querySelectorAll("#api-seg [data-api]").forEach((b) => {
+      b.classList.toggle("on", b.getAttribute("data-api") === mode);
+    });
+    const autoBtn = document.querySelector('#api-seg [data-api="auto"]');
+    if (autoBtn) {
+      autoBtn.title = p && p.effective_api && mode === "auto"
+        ? "Auto → " + p.effective_api
+        : "Responses on OpenAI and xAI, Chat elsewhere";
+    }
+  }
+
+  async function setApi(mode) {
+    const body = { api: mode };
+    if (state.provider === "custom") {
+      const url = $("provider-url") && $("provider-url").value.trim();
+      body.provider = url || state.providerLabel || "custom";
+    } else if (state.provider) {
+      body.provider = state.provider;
+    }
+    const r = await fetch("/api/provider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    paintApi(data);
+    await refreshStatus();
     return data;
   }
 
@@ -1821,6 +1873,18 @@
         keyInput.value = "";
         await loadModels();
         await refreshStatus();
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const apiSeg = $("api-seg");
+  if (apiSeg) {
+    apiSeg.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-api]");
+      if (!b) return;
+      try {
+        await setApi(b.getAttribute("data-api"));
       } catch (err) {
         addMsg("sys", String(err.message || err));
       }
