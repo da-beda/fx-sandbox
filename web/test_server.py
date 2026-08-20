@@ -28,6 +28,10 @@ class ParseModels(unittest.TestCase):
         found = server.parse_models("  zai/glm-5.2   default\nanthropic/claude-sonnet-4.6")
         self.assertEqual(found[0]["id"], "zai/glm-5.2")
 
+    def test_ids_without_slash(self):
+        found = server.parse_models("grok-4\nllama3.2")
+        self.assertEqual([m["id"] for m in found], ["grok-4", "llama3.2"])
+
 
 class RankModels(unittest.TestCase):
     def test_glm_first_hides_fast(self):
@@ -46,6 +50,13 @@ class RankModels(unittest.TestCase):
         ranked = server.rank_models(found, "zai/glm-5.2-fast")
         self.assertEqual(ranked[0]["id"], "zai/glm-5.2")
         self.assertIn("zai/glm-5.2-fast", [m["id"] for m in ranked])
+
+    def test_does_not_invent_glm_for_other_host(self):
+        found = [{"id": "grok-4", "label": "grok-4"}]
+        ranked = server.rank_models(found, "grok-4")
+        ids = [m["id"] for m in ranked]
+        self.assertEqual(ids[0], "grok-4")
+        self.assertNotIn("zai/glm-5.2", ids)
 
 
 class RecoverError(unittest.TestCase):

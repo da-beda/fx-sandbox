@@ -171,6 +171,15 @@
         <span class="cell-k">Folder</span>
         <input id="folder-input" type="text" spellcheck="false" placeholder="Folder" autocomplete="off">
       </label>
+      <button type="button" class="cell" id="provider-row">
+        <span class="cell-k">Provider</span>
+        <span class="cell-v" id="provider-val">Vercel</span>
+      </button>
+      <ul id="provider-list" class="pick" hidden></ul>
+      <label class="cell stack" id="provider-url-row" hidden>
+        <span class="cell-k">Upstream</span>
+        <input id="provider-url" type="text" spellcheck="false" placeholder="https://host/v1" autocomplete="off">
+      </label>
       <button type="button" class="cell" id="model-row">
         <span class="cell-k">Model</span>
         <span class="cell-v" id="model-val">GLM 5.2</span>
@@ -192,10 +201,10 @@
           <button type="button" data-theme="dark">Dark</button>
         </div>
       </div>
-      <div class="cell" id="key-row" hidden>
-        <span class="cell-k">Gateway key</span>
-        <span class="cell-v warn">Missing</span>
-      </div>
+      <label class="cell stack" id="key-row" hidden>
+        <span class="cell-k">API key</span>
+        <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="vck_… or sk-… / xai-…">
+      </label>
     </section>
 
     <section class="group">
@@ -208,6 +217,10 @@
       <div class="cell">
         <span class="cell-k">Backend</span>
         <span class="cell-v" id="diag-backend"></span>
+      </div>
+      <div class="cell">
+        <span class="cell-k">Provider</span>
+        <span class="cell-v mono" id="diag-provider"></span>
       </div>
       <div class="cell">
         <span class="cell-k">Model id</span>

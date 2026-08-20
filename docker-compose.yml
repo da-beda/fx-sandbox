@@ -47,12 +47,19 @@ services:
       FX_MODEL: ${FX_MODEL:-zai/glm-5.2}
       FX_PERMISSION_MODE: ${FX_PERMISSION_MODE:-auto}
       AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      FX_UPSTREAM: ${FX_UPSTREAM:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-${FX_UPSTREAM:-}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
       TERM: ${TERM:-xterm-256color}
     env_file:
       - path: .env
         required: false
     cap_drop:
       - ALL
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     security_opt:
       - no-new-privileges:true
     pids_limit: 256

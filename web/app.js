@@ -69,6 +69,8 @@
     editing: false,
     status: null,
     kind: "",
+    provider: "",
+    providerLabel: "",
   };
   if (localStorage.getItem("fxs.yolo") === "0" && !localStorage.getItem("fxs.perm")) {
     state.perm = "auto";
@@ -786,6 +788,7 @@
     { id: "new", hint: "New chat" },
     { id: "files", hint: "Workspace" },
     { id: "settings", hint: "Folder, model, mode" },
+    { id: "provider", hint: "Vercel, xAI, Ollama" },
     { id: "models", hint: "Switch model" },
     { id: "permissions", hint: "Ask, auto, yolo" },
     { id: "resume", hint: "Sessions" },
@@ -1079,6 +1082,7 @@
     if (!s) {
       set("diag-backend", "unreachable");
       set("diag-model", "—");
+      set("diag-provider", "—");
       set("diag-session", state.resume || "—");
       set("diag-docker", "—");
       set("diag-bins", "—");
@@ -1086,6 +1090,16 @@
     }
     set("diag-backend", s.backend || "—");
     set("diag-model", s.model || state.model || "—");
+    const p = s.provider || {};
+    set("diag-provider", p.url || p.label || "Vercel AI Gateway");
+    if ($("provider-val")) $("provider-val").textContent = p.label || "Vercel";
+    state.provider = p.id || "";
+    state.providerLabel = p.label || "";
+    const urlRow = $("provider-url-row");
+    if (urlRow) {
+      urlRow.hidden = !p.url || p.id !== "custom";
+      if (p.url && $("provider-url")) $("provider-url").value = p.url;
+    }
     set("diag-session", state.resume && state.resume !== "last" ? state.resume : "last");
     set("diag-docker", s.docker || "—");
     const bins = [];
@@ -1248,6 +1262,72 @@
   function openChrome() { morphChrome(true); }
   function closeChrome() { morphChrome(false); }
 
+  async function setProvider(id, url) {
+    const body = { provider: url || id };
+    const r = await fetch("/api/provider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    state.provider = data.id || id;
+    state.providerLabel = data.label || id;
+    $("provider-val").textContent = state.providerLabel;
+    $("provider-list").hidden = true;
+    const urlRow = $("provider-url-row");
+    if (urlRow) {
+      urlRow.hidden = (data.id || id) !== "custom";
+      if (data.url && $("provider-url")) $("provider-url").value = data.url;
+    }
+    await loadModels();
+    await refreshStatus();
+    if (data.model) {
+      state.model = data.model;
+      $("model-val").textContent = modelName(data.model) || data.model;
+    }
+    if (data.needs_key) {
+      const row = $("key-row");
+      const inp = $("key-input");
+      if (row) row.hidden = false;
+      if (inp) inp.focus();
+    }
+    return data;
+  }
+
+  function paintProviders(list) {
+    const el = $("provider-list");
+    if (!el) return;
+    el.innerHTML = "";
+    (list || []).forEach((p) => {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = p.label;
+      b.classList.toggle("on", p.id === state.provider || (!state.provider && p.id === "vercel"));
+      b.addEventListener("click", async () => {
+        try {
+          await setProvider(p.id, p.url);
+        } catch (e) {
+          addMsg("sys", String(e.message || e));
+        }
+      });
+      li.appendChild(b);
+      el.appendChild(li);
+    });
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = "Custom /v1 URL";
+    b.classList.toggle("on", state.provider === "custom");
+    b.addEventListener("click", () => {
+      $("provider-url-row").hidden = false;
+      $("provider-url").focus();
+    });
+    li.appendChild(b);
+    el.appendChild(li);
+  }
+
   async function loadModels() {
     const list = $("model-list");
     list.innerHTML = "";
@@ -1287,6 +1367,8 @@
   async function openSettings(opts) {
     folderInput.value = state.workspace;
     $("model-list").hidden = true;
+    const plist = $("provider-list");
+    if (plist) plist.hidden = true;
     $("model-val").textContent = modelName(state.model) || "—";
     setPerm(state.perm);
     applyTheme();
@@ -1316,6 +1398,12 @@
     if (id === "models") {
       await openSettings();
       $("model-list").hidden = false;
+      return;
+    }
+    if (id === "provider") {
+      await openSettings();
+      paintProviders((state.status && state.status.provider && state.status.provider.providers) || []);
+      $("provider-list").hidden = false;
       return;
     }
     if (id === "permissions") {
@@ -1698,6 +1786,46 @@
     const list = $("model-list");
     list.hidden = !list.hidden;
   });
+  $("provider-row").addEventListener("click", () => {
+    const list = $("provider-list");
+    const known = (state.status && state.status.provider && state.status.provider.providers) || [];
+    paintProviders(known);
+    list.hidden = !list.hidden;
+  });
+  $("provider-url").addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const url = $("provider-url").value.trim();
+    if (!url) return;
+    try {
+      await setProvider("custom", url);
+    } catch (err) {
+      addMsg("sys", String(err.message || err));
+    }
+  });
+  const keyInput = $("key-input");
+  if (keyInput) {
+    keyInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const key = keyInput.value.trim();
+      if (!key) return;
+      try {
+        const r = await fetch("/api/key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        keyInput.value = "";
+        await loadModels();
+        await refreshStatus();
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
   $("perm-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-perm]");
     if (b) setPerm(b.getAttribute("data-perm"));
