@@ -19,6 +19,7 @@
       <span id="project-name">project</span>
     </button>
     <p id="meta" class="meta"></p>
+    <button type="button" id="model-btn" class="chip" title="Model">glm-5.2</button>
     <button type="button" id="perm-btn" class="chip" title="Permission mode">yolo</button>
     <button type="button" id="theme-btn" class="icon" aria-label="Theme" title="Theme">
       <svg class="i-sun" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -41,8 +42,11 @@
 
   <footer class="dock">
     <p id="activity" class="activity" hidden></p>
+    <div id="palette" class="palette" hidden>
+      <ul id="palette-list" role="listbox"></ul>
+    </div>
     <form id="composer" class="composer">
-      <textarea id="prompt" rows="1" placeholder="Ask" autocomplete="off" enterkeyhint="send"></textarea>
+      <textarea id="prompt" rows="1" placeholder="Ask  ·  /  ·  @" autocomplete="off" enterkeyhint="send"></textarea>
       <button type="submit" class="send" aria-label="Send" id="send">
         <svg class="i-up" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 12.5V3.5M8 3.5 3.5 8M8 3.5 12.5 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -71,6 +75,26 @@
       <ul id="session-list"></ul>
       <div class="row">
         <button value="new" class="ghost" id="new-session">New</button>
+        <button value="close" class="solid">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="models-dlg" class="sheet">
+    <form method="dialog">
+      <h2>Model</h2>
+      <ul id="model-list"></ul>
+      <div class="row">
+        <button value="close" class="solid">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="info-dlg" class="sheet">
+    <form method="dialog">
+      <h2 id="info-title">Status</h2>
+      <pre id="info-body" class="info"></pre>
+      <div class="row">
         <button value="close" class="solid">Done</button>
       </div>
     </form>

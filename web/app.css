@@ -151,6 +151,12 @@ textarea, input {
   border: 1px solid var(--line);
 }
 .chip.on { color: var(--fg); }
+.chip.slim {
+  max-width: 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .icon {
   width: 36px;
   height: 36px;
@@ -379,3 +385,35 @@ textarea, input {
 }
 .dot.off { background: var(--subtle); }
 .dot.warn { background: var(--warn); }
+
+.palette {
+  margin: 0 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.palette ul {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 240px;
+  overflow: auto;
+}
+.palette li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.palette li[aria-selected="true"],
+.palette li:hover { background: var(--bg); }
+.palette .name { font-family: var(--mono); font-size: 12.5px; }
+.palette .name b { font-weight: 650; color: var(--fg); }
+.palette .hint { color: var(--subtle); font-size: 12px; flex-shrink: 0; }
+.palette .empty { color: var(--subtle); padding: 10px 12px; font-size: 13px; }

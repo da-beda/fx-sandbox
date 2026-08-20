@@ -63,7 +63,234 @@
   }
 
   function esc(s) {
-    return s.replace(/[&<>]/g, (c) => ({ "&": "&", "<": "<", ">": ">" }[c]));
+    return String(s).replace(/[&<>"]/g, (c) =>
+      ({ "&": "&", "<": "<", ">": ">", '"': """ }[c]));
+  }
+
+  function fuzzy(query, text) {
+    const q = (query || "").toLowerCase();
+    const t = (text || "").toLowerCase();
+    if (!q) return 1;
+    const hit = t.indexOf(q);
+    if (hit >= 0) return 2000 - hit - (t.length - q.length);
+    let i = 0, score = 0, last = -2;
+    for (let j = 0; j < t.length && i < q.length; j++) {
+      if (t[j] === q[i]) {
+        score += j === last + 1 ? 6 : 1;
+        if (j === 0 || "/-_.".includes(t[j - 1])) score += 10;
+        last = j;
+        i++;
+      }
+    }
+    return i === q.length ? score : 0;
+  }
+
+  function mark(text, query) {
+    const q = (query || "").toLowerCase();
+    if (!q) return esc(text);
+    const t = text.toLowerCase();
+    const hit = t.indexOf(q);
+    if (hit >= 0) {
+      return esc(text.slice(0, hit)) + "<b>" + esc(text.slice(hit, hit + q.length)) + "</b>" +
+        esc(text.slice(hit + q.length));
+    }
+    let i = 0, out = "";
+    for (let j = 0; j < text.length; j++) {
+      if (i < q.length && t[j] === q[i]) {
+        out += "<b>" + esc(text[j]) + "</b>";
+        i++;
+      } else out += esc(text[j]);
+    }
+    return out;
+  }
+
+  const COMMANDS = [
+    { id: "clear", hint: "New session" },
+    { id: "new", hint: "New session" },
+    { id: "resume", hint: "Pick a session" },
+    { id: "models", hint: "Switch model" },
+    { id: "permissions", hint: "yolo / auto" },
+    { id: "status", hint: "Runtime" },
+    { id: "usage", hint: "Local spend" },
+    { id: "credits", hint: "Gateway balance" },
+    { id: "doctor", hint: "Preflight" },
+    { id: "help", hint: "Commands" },
+  ];
+
+  const palette = $("palette");
+  const paletteList = $("palette-list");
+  let pal = { open: false, kind: "", items: [], idx: 0, start: 0, query: "", timer: 0 };
+
+  function tokenAt() {
+    const caret = promptEl.selectionStart || 0;
+    const left = promptEl.value.slice(0, caret);
+    const m = left.match(/(^|[\s])(\/|@)([^\s]*)$/);
+    if (!m) return null;
+    return { kind: m[2], query: m[3], start: caret - m[3].length - 1, caret };
+  }
+
+  function hidePalette() {
+    pal.open = false;
+    pal.items = [];
+    palette.hidden = true;
+    paletteList.innerHTML = "";
+  }
+
+  function renderPalette() {
+    paletteList.innerHTML = "";
+    if (!pal.items.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = pal.kind === "@" ? "No files" : "No commands";
+      paletteList.appendChild(li);
+      palette.hidden = false;
+      pal.open = true;
+      return;
+    }
+    pal.items.forEach((it, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", i === pal.idx ? "true" : "false");
+      li.innerHTML = '<span class="name">' + mark(it.label, pal.query) + "</span>" +
+        (it.hint ? '<span class="hint">' + esc(it.hint) + "</span>" : "");
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pal.idx = i;
+        pickPalette();
+      });
+      paletteList.appendChild(li);
+    });
+    palette.hidden = false;
+    pal.open = true;
+    const sel = paletteList.children[pal.idx];
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
+  }
+
+  function setPaletteItems(items) {
+    pal.items = items;
+    pal.idx = 0;
+    renderPalette();
+  }
+
+  async function updatePalette() {
+    const tok = tokenAt();
+    if (!tok) { hidePalette(); return; }
+    pal.kind = tok.kind;
+    pal.query = tok.query;
+    pal.start = tok.start;
+    if (tok.kind === "/") {
+      const rows = COMMANDS
+        .map((c) => ({ ...c, label: "/" + c.id, score: fuzzy(tok.query, c.id + " " + c.hint) }))
+        .filter((c) => !tok.query || c.score > 0)
+        .sort((a, b) => b.score - a.score);
+      setPaletteItems(rows);
+      return;
+    }
+    if (!state.workspace) { hidePalette(); return; }
+    clearTimeout(pal.timer);
+    pal.timer = setTimeout(async () => {
+      try {
+        const r = await fetch("/api/files?workspace=" + encodeURIComponent(state.workspace) +
+          "&q=" + encodeURIComponent(tok.query));
+        const data = await r.json();
+        const files = (data.files || []).map((p) => ({
+          id: p, label: p, hint: "", score: fuzzy(tok.query, p),
+        }));
+        setPaletteItems(files);
+      } catch { hidePalette(); }
+    }, 70);
+  }
+
+  function pickPalette() {
+    const it = pal.items[pal.idx];
+    if (!it) { hidePalette(); return; }
+    if (pal.kind === "/") {
+      hidePalette();
+      promptEl.value = "";
+      grow();
+      runCommand(it.id);
+      return;
+    }
+    const v = promptEl.value;
+    const caret = promptEl.selectionStart || 0;
+    const next = v.slice(0, pal.start) + "@" + it.id + " " + v.slice(caret);
+    promptEl.value = next;
+    const pos = pal.start + it.id.length + 2;
+    promptEl.setSelectionRange(pos, pos);
+    hidePalette();
+    grow();
+    promptEl.focus();
+  }
+
+  function showInfo(title, text) {
+    $("info-title").textContent = title;
+    $("info-body").textContent = text || "";
+    $("info-dlg").showModal();
+  }
+
+  async function runCommand(id) {
+    if (id === "clear" || id === "new") {
+      state.resume = "";
+      localStorage.removeItem("fxs.resume");
+      thread.innerHTML = "";
+      refreshStatus();
+      return;
+    }
+    if (id === "resume") {
+      await loadSessions();
+      sessionsDlg.showModal();
+      return;
+    }
+    if (id === "models") { openModels(); return; }
+    if (id === "permissions") { setYolo(!state.yolo); return; }
+    if (id === "help") {
+      showInfo("Commands", COMMANDS.map((c) => "/" + c.id + "  " + c.hint).join("\n"));
+      return;
+    }
+    if (["status", "usage", "credits", "doctor"].includes(id)) {
+      try {
+        const r = await fetch("/api/fx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ args: [id], workspace: state.workspace }),
+        });
+        const data = await r.json();
+        showInfo("/" + id, data.text || data.error || JSON.stringify(data, null, 2));
+      } catch (e) {
+        showInfo("/" + id, String(e.message || e));
+      }
+    }
+  }
+
+  async function openModels() {
+    const list = $("model-list");
+    list.innerHTML = "";
+    try {
+      const data = await (await fetch("/api/models")).json();
+      (data.models || []).forEach((m) => {
+        const id = m.id || m;
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = m.label ? m.label + "  " + id : id;
+        if (id === (data.current || state.model)) b.style.fontWeight = "590";
+        b.addEventListener("click", async () => {
+          await fetch("/api/model", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: id }),
+          });
+          $("model-btn").textContent = (id.split("/")[1] || id).slice(0, 16);
+          $("models-dlg").close();
+          refreshStatus();
+        });
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+    } catch {
+      list.innerHTML = "<li class='meta' style='padding:8px'>Could not load models.</li>";
+    }
+    $("models-dlg").showModal();
   }
 
   function render(src) {
@@ -118,6 +345,7 @@
       const bits = [];
       if (s.demo) bits.push('<span class="dot off"></span>demo');
       else bits.push('<span class="dot"></span>' + (s.model || "fxs"));
+      if (s.model) $("model-btn").textContent = (s.model.split("/")[1] || s.model).slice(0, 18);
       if (s.key === false) bits.push("no key");
       if (!s.demo && s.docker === "idle") bits.push("docker off");
       if (state.resume && state.resume !== "last") bits.push("resume");
@@ -174,6 +402,16 @@
   async function send(text) {
     if (state.busy) { stop(); return; }
     if (!text.trim()) return;
+    const slash = text.trim();
+    if (slash.startsWith("/") && !slash.includes(" ") && !slash.includes("@")) {
+      const id = slash.slice(1).toLowerCase();
+      if (COMMANDS.some((c) => c.id === id)) {
+        promptEl.value = "";
+        grow();
+        runCommand(id);
+        return;
+      }
+    }
     if (!state.workspace) {
       folderDlg.showModal();
       folderInput.focus();
@@ -261,8 +499,32 @@
     e.preventDefault();
     send(promptEl.value);
   });
-  promptEl.addEventListener("input", grow);
+  promptEl.addEventListener("input", () => { grow(); updatePalette(); });
   promptEl.addEventListener("keydown", (e) => {
+    if (pal.open) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        pal.idx = Math.min(pal.idx + 1, pal.items.length - 1);
+        renderPalette();
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        pal.idx = Math.max(pal.idx - 1, 0);
+        renderPalette();
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        pickPalette();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        hidePalette();
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send(promptEl.value);
@@ -313,6 +575,7 @@
   });
   permBtn.addEventListener("click", () => setYolo(!state.yolo));
   $("theme-btn").addEventListener("click", cycleTheme);
+  $("model-btn").addEventListener("click", openModels);
 
   applyTheme();
   setYolo(state.yolo);
