@@ -65,6 +65,7 @@ On Linux, native fx has no OS sandbox — prefer `fxs run`.
 | `fxs run -c` | Resume last fxs session in this directory |
 | `fxs sessions` | List fxs sessions for `$PWD` |
 | `fxs ask …` | One-shot `fx ask` in that container |
+| `fxs ui` | Optional local web UI (`http://127.0.0.1:8787`) |
 | `fxs build` | Build `fx-sandbox:latest` |
 | `fxs status` | Binary, key, Docker, image, PATH |
 | `fxs key` | (Re)prompt for the gateway key |
@@ -93,6 +94,19 @@ fxs run --no-persist     # ephemeral tmpfs home
 ```
 
 Native `fx -c` still reads `~/.fx` and does not see fxs sessions.
+
+## UI
+
+Optional. Same sandbox, a quieter surface.
+
+```bash
+cd /path/to/one/project
+fxs ui
+```
+
+Opens `http://127.0.0.1:8787`. No npm. Python 3 stdlib. `--bind-all` / `--port` if you need them. `--demo` if Docker is not up.
+
+Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 
 ## API key
 

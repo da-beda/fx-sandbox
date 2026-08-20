@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>fxs</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="top">
+    <button type="button" id="project" class="project" title="Workspace">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2.5 4.5h4l1 1.5h6v7.5h-11z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      </svg>
+      <span id="project-name">project</span>
+    </button>
+    <p id="meta" class="meta"></p>
+    <button type="button" id="sessions-btn" class="icon" aria-label="Sessions" title="Sessions">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+        <path d="M8 5v3.2L10 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </header>
+
+  <main id="thread" class="thread"></main>
+
+  <footer class="dock">
+    <form id="composer" class="composer">
+      <textarea id="prompt" rows="1" placeholder="Ask" autocomplete="off" enterkeyhint="send"></textarea>
+      <button type="submit" class="send" aria-label="Send" id="send">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 12.5V3.5M8 3.5 3.5 8M8 3.5 12.5 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </form>
+  </footer>
+
+  <dialog id="folder-dlg" class="sheet">
+    <form method="dialog" id="folder-form">
+      <h2>Folder</h2>
+      <input id="folder-input" type="text" spellcheck="false" placeholder="/path/to/project">
+      <div class="row">
+        <button value="cancel" class="ghost">Cancel</button>
+        <button value="ok" class="solid">Open</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sessions-dlg" class="sheet">
+    <form method="dialog">
+      <h2>Sessions</h2>
+      <ul id="session-list"></ul>
+      <div class="row">
+        <button value="new" class="ghost" id="new-session">New</button>
+        <button value="close" class="solid">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
