@@ -37,26 +37,26 @@
     more: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>',
   };
   const STEP_ICO = {
-    read: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2.5h4.2L13 6.3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3"/><path d="M9.2 2.5V6.2H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
-    write: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 12.5 11.2 4.8a1.2 1.2 0 0 1 1.7 1.7L5.2 14.2H3.5v-1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="m10.4 4.1 1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    search: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3"/><path d="m10.2 10.2 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    run: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.2" width="11" height="9.6" rx="1.6" stroke="currentColor" stroke-width="1.3"/><path d="m6 6.2 3 1.8-3 1.8V6.2Z" fill="currentColor"/></svg>',
-    web: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><path d="M3 8h10M8 3c1.6 1.8 2.4 3.6 2.4 5S9.6 11.2 8 13C6.4 11.2 5.6 9.4 5.6 8S6.4 4.8 8 3Z" stroke="currentColor" stroke-width="1.2"/></svg>',
-    retry: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><path d="M8 5.2V8l1.8 1.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    list: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.2 1.5h5.2A1.2 1.2 0 0 1 13.7 5.7v6.1A1.2 1.2 0 0 1 12.5 13H3.7A1.2 1.2 0 0 1 2.5 11.8V4.2Z" stroke="currentColor" stroke-width="1.3"/></svg>',
-    delete: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 4.5h9M6.2 4.5V3.4A.9.9 0 0 1 7.1 2.5h1.8a.9.9 0 0 1 .9.9v1.1M12.2 4.5l-.5 8.1a1 1 0 0 1-1 1H5.3a1 1 0 0 1-1-1l-.5-8.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    ok: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="m3.8 8.2 2.8 2.8 5.6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    agent: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>',
-    image: ICO.image,
-    skill: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="m8 2.5 1.5 4.1H14L10.8 9.2l1.4 4.3L8 10.8 3.8 13.5l1.4-4.3L2 6.6h4.5L8 2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
-    status: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/></svg>',
-    tool: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 11.5 11.5 4M6.5 4H4v2.5M9.5 12H12V9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    read: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M7 3h6.2L18 7.8V11h-1.8V8.6H12V4.8H7A1.2 1.2 0 0 0 5.8 6v12A1.2 1.2 0 0 0 7 19.2h4.2V21H7A3 3 0 0 1 4 18V6a3 3 0 0 1 3-3zm9.75 9.2a4.05 4.05 0 1 1-2.86 6.92l-2 2 1.27 1.27 2-2A4.05 4.05 0 0 1 16.75 12.2zm0 1.8a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5z"/></svg>',
+    write: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4.8 16.7 15.4 6.1l2.5 2.5-10.6 10.6H4.8v-2.5zm12.2-12.3 1.3-1.3a1.4 1.4 0 0 1 2 2l-1.3 1.3-2-2z"/></svg>',
+    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 3a7.8 7.8 0 0 1 6.17 12.57l3.73 3.73-1.41 1.41-3.73-3.73A7.8 7.8 0 1 1 10.8 3zm0 1.8a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>',
+    explore: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 3a7.8 7.8 0 0 1 6.17 12.57l3.73 3.73-1.41 1.41-3.73-3.73A7.8 7.8 0 1 1 10.8 3zm0 1.8a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>',
+    run: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M6.2 3.5h11.6A2.7 2.7 0 0 1 20.5 6.2v11.6a2.7 2.7 0 0 1-2.7 2.7H6.2a2.7 2.7 0 0 1-2.7-2.7V6.2A2.7 2.7 0 0 1 6.2 3.5zM5.3 6.2c0-.5.4-.9.9-.9h11.6c.5 0 .9.4.9.9v11.6c0 .5-.4.9-.9.9H6.2a.9.9 0 0 1-.9-.9V6.2z"/><path d="M8.2 8.4 11.8 12 8.2 15.6l-1.3-1.3 2.1-2.3-2.1-2.3L8.2 8.4zm5.2 5.2h4.2v-1.8h-4.2v1.8z"/></svg>',
+    web: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm0 1.8c-1.66 1.86-2.66 4.1-2.86 6.5h5.72C14.66 8.9 13.66 6.66 12 4.8zM6.3 11.3c.22-2.5 1.32-4.8 3.02-6.6A7.18 7.18 0 0 0 4.82 11.3H6.3zm11.4 0h1.48A7.18 7.18 0 0 0 14.68 4.7c1.7 1.8 2.8 4.1 3.02 6.6zM4.82 12.7A7.18 7.18 0 0 0 9.32 19.3c-1.7-1.8-2.8-4.1-3.02-6.6H4.82zm3.5 0c.2 2.4 1.2 4.64 2.86 6.5 1.66-1.86 2.66-4.1 2.86-6.5H8.32zm6.86 0c-.22 2.5-1.32 4.8-3.02 6.6a7.18 7.18 0 0 0 4.5-6.6h-1.48z"/></svg>',
+    retry: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2a8.8 8.8 0 1 1-8.1 5.6l1.7.7A7 7 0 1 0 12 5.2V8l4-4-4-4v3.2z"/></svg>',
+    list: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 4 11 6.2h6.4A2.4 2.4 0 0 1 19.8 8.6v8.8a2.4 2.4 0 0 1-2.4 2.4H6.6A2.4 2.4 0 0 1 4.2 17.4V6.4A2.4 2.4 0 0 1 6.6 4h2.6z"/></svg>',
+    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 3.4h5.6l.8 1.6h4.2v1.8H4.2V5h4.2l.8-1.6zM6.4 8.4h11.2l-.8 11.2a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6.4 8.4z"/></svg>',
+    ok: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.2-4-4 1.6-1.6 2.4 2.4 7.2-7.2 1.6 1.6-8.8 8.8z"/></svg>',
+    agent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm0 6.2a2.8 2.8 0 1 0 .1 5.6 2.8 2.8 0 0 0-.1-5.6z"/></svg>',
+    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 3.6h10.8A2.6 2.6 0 0 1 20 6.2v11.6a2.6 2.6 0 0 1-2.6 2.6H6.6A2.6 2.6 0 0 1 4 17.8V6.2A2.6 2.6 0 0 1 6.6 3.6zm8.6 3.8a1.5 1.5 0 1 0 .1 3 1.5 1.5 0 0 0-.1-3zM5.8 16.4 9.4 12.8l8 8c.3-.2.6-.4.8-.7l-9-9-3.4 3.4v2.9z"/></svg>',
+    skill: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7.4 3.2a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2zm9.6 1.4 2.2 3.8h-4.4l2.2-3.8zM6.6 13.2h2.4A2.4 2.4 0 0 1 11.4 15.6v2.4A2.4 2.4 0 0 1 9 20.4H6.6A2.4 2.4 0 0 1 4.2 18v-2.4A2.4 2.4 0 0 1 6.6 13.2zm10.4.2a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8z"/></svg>',
+    status: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2A5.2 5.2 0 0 1 17.2 9.8c0 1.8-.9 3.2-2.3 4.2v1.6H9.1v-1.6A5.2 5.2 0 0 1 12 3.2zM9.4 17.2h5.2v1.2H9.4v-1.2zm.8 2.2h3.6V21h-3.6v-1.6z"/></svg>',
+    tool: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m7.2 14.2 7.4-7.4 2.2 2.2-7.4 7.4H7.2v-2.2zm8.2-9.6 1.5-1.5a1.5 1.5 0 0 1 2.1 2.1l-1.5 1.5-2.1-2.1zM5 17.2h5.2V21H5v-3.8z"/></svg>',
+    chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6.4 9.2 12 14.8l5.6-5.6 1.4 1.4-7 7-7-7 1.4-1.4z"/></svg>',
   };
-  const GROUP_NOUN = {
-    read: ["file", "files"], write: ["file", "files"], search: ["search", "searches"],
-    run: ["command", "commands"], web: ["page", "pages"], list: ["folder", "folders"],
-    delete: ["file", "files"], tool: ["tool", "tools"],
-  };
+  const LIVE_DOTS = '<span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
+  const GROUPABLE = new Set(["read", "write", "search", "web", "list", "delete", "tool", "image", "skill"]);
+  const EXPLORE = new Set(["read", "search"]);
   const IMG_EXT = /\.(png|jpe?g|webp|gif)$/i;
   const MD_EXT = /\.(md|markdown|mdown|mdx)$/i;
 
@@ -1024,37 +1024,220 @@
     const s = Math.max(0, Math.round(ms / 1000));
     if (s < 60) return s + "s";
     const m = Math.floor(s / 60);
-    const r = s % 60;
-    return m + "m " + String(r).padStart(2, "0") + "s";
+    return m + "m " + (s % 60) + "s";
   }
 
-  function groupLabel(kind, n) {
-    const pair = GROUP_NOUN[kind] || ["step", "steps"];
-    const noun = n === 1 ? pair[0] : pair[1];
-    const verb = { read: "Read", write: "Edited", search: "Searched", run: "Ran",
-      web: "Fetched", list: "Listed", delete: "Deleted" }[kind] || "Used";
-    return verb + " " + n + " " + noun;
+  function clip(s, n) {
+    s = String(s || "").replace(/\s+/g, " ").trim();
+    return s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + "…";
   }
 
-  function paintStep(el, step) {
-    const kind = step.kind || "status";
-    const ico = STEP_ICO[kind] || (step.status === "ok" ? STEP_ICO.ok : STEP_ICO.status);
-    el.className = "step" + (step.status === "running" ? " running" : "") +
-      (step.status === "warn" ? " warn" : "") + (step.status === "ok" ? " ok" : "");
-    el.dataset.kind = kind;
-    el.dataset.status = step.status || "";
-    if (step.id) el.dataset.id = step.id;
-    if (step.path) el.dataset.path = step.path;
-    else el.removeAttribute("data-path");
-    const tag = step.path ? "button" : "div";
-    if (el.tagName.toLowerCase() !== tag) {
-      /* keep as div; button type set below */
+  function stepItems(el) {
+    try { return JSON.parse(el.dataset.items || "[]"); } catch { return []; }
+  }
+
+  function itemFrom(step) {
+    return {
+      label: step.label || "",
+      path: step.path || "",
+      detail: step.detail || "",
+      kind: step.kind || "status",
+      status: step.status || "ok",
+    };
+  }
+
+  function itemCaption(it) {
+    if (it.path) {
+      const parts = String(it.path).split("/").filter(Boolean);
+      return parts[parts.length - 1] || it.path;
     }
-    if (step.path) el.setAttribute("type", "button");
-    const text = (step.label || "") +
-      (kind === "retry" && step.detail ? " · " + step.detail : "");
-    el.innerHTML = '<span class="ico" aria-hidden="true">' + ico + "</span>" +
-      '<span class="lab">' + esc(text) + "</span>";
+    return clip(String(it.detail || it.label || "").replace(
+      /^(Ran command|Running command|Ran|Read|Reading|Edited|Explored|Loaded|Viewed|Listed|Listing)\s+/i, ""), 56);
+  }
+
+  function normPath(p) {
+    return String(p || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+  }
+
+  function samePath(a, b) {
+    a = normPath(a);
+    b = normPath(b);
+    if (!a || !b) return false;
+    return a === b || a.endsWith("/" + b) || b.endsWith("/" + a);
+  }
+
+  function itemKey(it) {
+    const ident = normPath(it.path || it.detail || "");
+    if (!ident) return "";
+    return (it.kind || "") + ":" + ident;
+  }
+
+  function counted(verb, n, one, many) {
+    return verb + ' <span class="num">' + n + "</span> " + (n === 1 ? one : many);
+  }
+
+  function countBit(n, one, many) {
+    return '<span class="num">' + n + "</span> " + (n === 1 ? one : many);
+  }
+
+  function batchKind(items) {
+    const hasFile = items.some((it) => it.kind === "read");
+    const hasSearch = items.some((it) => it.kind === "search");
+    if (hasFile && hasSearch) return "explore";
+    if (hasSearch && !hasFile) return "search";
+    if (items.length && items.every((it) => it.kind === "list")) return "list";
+    if (hasFile) return "read";
+    return (items[0] && items[0].kind) || "status";
+  }
+
+  function groupStatus(items, incoming) {
+    if (incoming && incoming.status === "running") return "running";
+    if (items.some((it) => it.status === "running")) return "running";
+    return "ok";
+  }
+
+  function canMerge(row, step) {
+    if (!row || row.classList.contains("live")) return false;
+    const k = step.kind || "";
+    const rk = row.dataset.kind;
+    if (!k || k === "run" || rk === "run") return false;
+    if (k === "retry" || rk === "retry") return false;
+    if ((EXPLORE.has(k) || k === "explore") && (EXPLORE.has(rk) || rk === "explore")) return true;
+    return rk === k && GROUPABLE.has(k);
+  }
+
+  const PROGRESS_RE = [
+    [/^(reading|read)\b\s*(.*)$/i, "read"],
+    [/^(listing|listed|list)\b\s*(.*)$/i, "list"],
+    [/^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$/i, "write"],
+    [/^(running|ran|executing)\b(?:\s+command)?\s*(.*)$/i, "run"],
+    [/^(searching|searched|search|grepping|grep)\b\s*(.*)$/i, "search"],
+    [/^(loading|loaded)\s+(?:skill\s+)?(.*)$/i, "skill"],
+    [/^(viewing|viewed)\b\s*(.*)$/i, "image"],
+  ];
+
+  function stripGlyphs(s) {
+    return String(s || "").replace(/^[^\p{L}\p{N}.\/~]+/u, "").trim();
+  }
+
+  function looksPath(s) {
+    s = String(s || "").trim().replace(/^["']|["']$/g, "");
+    if (!s) return "";
+    if (s === "." || s === "./") return ".";
+    if (/\s/.test(s) && s.indexOf("/") < 0) return "";
+    if (/[\/.\\]/.test(s) || /^[\w.@-]+$/.test(s)) return s;
+    return "";
+  }
+
+  function normalizeStep(step) {
+    if (!step) return null;
+    let kind = step.kind || "";
+    let label = stripGlyphs(step.label || "");
+    let detail = step.detail || "";
+    let path = step.path || "";
+    let status = step.status || "";
+    if ((kind === "ok" || kind === "status" || kind === "retry") && /recovered/i.test(label + " " + detail)) return null;
+    const raw = stripGlyphs([label, detail].filter(Boolean).join(" "));
+    if (/recovered/i.test(raw) && /attempt|succeed/i.test(raw)) return null;
+    if (kind === "status" || kind === "tool" || kind === "ok" || !kind) {
+      for (const [re, k] of PROGRESS_RE) {
+        const m = raw.match(re);
+        if (!m) continue;
+        kind = k;
+        const rest = (m[2] || "").trim();
+        if (!path) path = looksPath(rest);
+        if (!detail) detail = rest;
+        if (!status || status === "ok") status = /ing$/i.test(m[1]) && !rest ? "running" : (status || "ok");
+        break;
+      }
+    }
+    if (!kind || kind === "status") return null;
+    if (!label && !path && !detail && kind !== "retry") return null;
+    return Object.assign({}, step, { kind, label, detail, path, status: status || step.status || "ok" });
+  }
+
+  function formatLab(step, n, items) {
+    const kind = step.kind || "status";
+    const status = step.status || "";
+    const first = (items && items[0]) || {};
+    const snippet = clip(first.detail || step.detail || "", 48);
+    if (kind === "run") {
+      const cmd = snippet.replace(/^(Ran command|Running command|Ran)\s+/i, "");
+      const verb = status === "running" ? "Running command" : "Ran command";
+      return { verb, det: cmd, aria: verb + (cmd ? " " + cmd : "") };
+    }
+    if (kind === "explore") {
+      const files = (items || []).filter((it) => it.kind === "read").length;
+      const searches = (items || []).filter((it) => it.kind === "search").length;
+      const bits = [];
+      const raw = [];
+      if (files) { bits.push(countBit(files, "file", "files")); raw.push(files + (files === 1 ? " file" : " files")); }
+      if (searches) { bits.push(countBit(searches, "search", "searches")); raw.push(searches + (searches === 1 ? " search" : " searches")); }
+      return { verb: "Explored", detHtml: bits.join(", "), aria: "Explored " + raw.join(", ") };
+    }
+    if (kind === "read") return { verb: counted("Read", n, "file", "files"), aria: "Read " + n + (n === 1 ? " file" : " files") };
+    if (kind === "write") return { verb: counted("Edited", n, "file", "files"), aria: "Edited " + n + (n === 1 ? " file" : " files") };
+    if (kind === "search") return { verb: counted("Ran", n, "search", "searches"), aria: "Ran " + n + (n === 1 ? " search" : " searches") };
+    if (kind === "web") return { verb: counted("Fetched", n, "page", "pages"), aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
+    if (kind === "list") return { verb: counted("Listed", n, "folder", "folders"), aria: "Listed " + n + (n === 1 ? " folder" : " folders") };
+    if (kind === "delete") return { verb: counted("Deleted", n, "file", "files"), aria: "Deleted " + n + (n === 1 ? " file" : " files") };
+    if (kind === "skill") return { verb: counted("Loaded", n, "skill", "skills"), aria: "Loaded " + n + (n === 1 ? " skill" : " skills") };
+    if (kind === "image") return { verb: counted("Viewed", n, "image", "images"), aria: "Viewed " + n + (n === 1 ? " image" : " images") };
+    if (kind === "tool") return { verb: counted("Used", n, "tool", "tools"), aria: "Used " + n + (n === 1 ? " tool" : " tools") };
+    let verb = esc(step.label || "");
+    if (kind === "retry" && step.detail) verb += ' <span class="num">' + esc(step.detail) + "</span>";
+    return { verb: verb || "Working", det: "", aria: step.label || "Working" };
+  }
+
+  function paintStep(el, step, items) {
+    items = (items || stepItems(el)).filter((it) => it.path || it.detail || it.label);
+    if (!items.length) items = [itemFrom(step)];
+    let kind = step.kind || el.dataset.kind || "status";
+    if (items.some((it) => it.kind === "read" || it.kind === "search")) kind = batchKind(items);
+    const status = step.status != null ? step.status : (el.dataset.status || "");
+    const n = items.length;
+    const open = el.classList.contains("open");
+    el.dataset.kind = kind;
+    el.dataset.status = status;
+    el.dataset.n = String(n);
+    el.dataset.items = JSON.stringify(items);
+    if (step.id) el.dataset.id = step.id;
+    const path = n === 1 ? (step.path || items[0].path) : "";
+    if (path) el.dataset.path = path;
+    else el.removeAttribute("data-path");
+    el.className = "step"
+      + (status === "running" ? " running" : "")
+      + (status === "warn" ? " warn" : "")
+      + (status === "ok" ? " ok" : "")
+      + (n > 1 || items.some((it) => it.path || it.detail) ? " fold" : "")
+      + (open ? " open" : "");
+    const ico = STEP_ICO[kind] || (status === "ok" ? STEP_ICO.ok : STEP_ICO.status);
+    const lab = formatLab({ kind, status, label: step.label, detail: step.detail, path: step.path }, n, items);
+    const kids = items.map((it) => {
+      const cap = esc(itemCaption(it));
+      if (!cap) return "";
+      if (it.path) {
+        return '<button type="button" class="kid" data-path="' + esc(it.path) + '">' + cap + "</button>";
+      }
+      return '<div class="kid">' + cap + "</div>";
+    }).join("");
+    const exp = open ? "true" : "false";
+    const shimmer = status === "running" ? " shimmer" : "";
+    el.innerHTML =
+      '<div class="spine">' +
+        '<button type="button" class="ico-btn" aria-expanded="' + exp + '" aria-label="' + esc(lab.aria) + '">' +
+          '<span class="ico-face ico-kind" aria-hidden="true">' + ico + "</span>" +
+          '<span class="ico-face ico-chev" aria-hidden="true">' + STEP_ICO.chev + "</span>" +
+        "</button>" +
+      "</div>" +
+      '<button type="button" class="hit" aria-expanded="' + exp + '">' +
+        '<span class="lab">' +
+          '<span class="verb' + shimmer + '">' + lab.verb + "</span>" +
+          (lab.detHtml ? '<span class="det">' + lab.detHtml + "</span>" :
+            (lab.det ? '<span class="det">' + esc(lab.det) + "</span>" : "")) +
+        "</span>" +
+      "</button>" +
+      '<div class="kids">' + kids + "</div>";
   }
 
   function startTrail() {
@@ -1064,50 +1247,94 @@
     thread.appendChild(trail);
     const live = document.createElement("div");
     live.className = "step live running";
-    live.innerHTML = '<span class="ico pulse" aria-hidden="true"></span>' +
-      '<span class="lab">Working · 0s</span>';
+    live.innerHTML = '<div class="spine">' + LIVE_DOTS + "</div>" +
+      '<span class="lab"><span class="verb">Working for</span><span class="num"> 0s</span></span>';
     trail.appendChild(live);
     const t0 = Date.now();
     const iv = setInterval(() => {
-      const lab = live.querySelector(".lab");
-      if (lab) lab.textContent = "Working · " + fmtElapsed(Date.now() - t0);
+      const num = live.querySelector(".num");
+      if (num) num.textContent = " " + fmtElapsed(Date.now() - t0);
     }, 1000);
+    function solids() {
+      return [...trail.querySelectorAll(":scope > .step:not(.live)")];
+    }
     function place(el) {
       trail.insertBefore(el, live);
     }
+    function apply(row, step, items) {
+      paintStep(row, { kind: batchKind(items), status: groupStatus(items, step), label: step.label, detail: step.detail, path: step.path, id: step.id }, items);
+    }
     return {
       el: trail,
-      push(step) {
-        if (!step || !step.label) return;
+      push(raw) {
+        const step = normalizeStep(raw);
+        if (!step) return;
+        const item = itemFrom(step);
+        const empty = !item.path && !item.detail;
         if (step.id) {
-          const existing = trail.querySelector('.step[data-id="' + step.id + '"]');
-          if (existing) { paintStep(existing, step); return; }
-        }
-        if (step.status === "ok") {
-          const rows = [...trail.querySelectorAll(".step:not(.live)")];
-          const last = rows[rows.length - 1];
-          if (last && last.dataset.kind === step.kind && last.dataset.status === "ok" && !step.id) {
-            const n = (parseInt(last.dataset.n || "1", 10) + 1);
-            last.dataset.n = String(n);
-            const lab = last.querySelector(".lab");
-            if (lab) lab.innerHTML = esc(groupLabel(step.kind, n));
-            if (step.path) last.dataset.path = step.path;
+          const existing = trail.querySelector('.step[data-id="' + CSS.escape(String(step.id)) + '"]');
+          if (existing) {
+            const items = empty ? stepItems(existing) : [item];
+            apply(existing, step, items);
             return;
           }
         }
-        const row = document.createElement(step.path ? "button" : "div");
-        if (step.path) row.type = "button";
-        row.dataset.n = "1";
-        paintStep(row, step);
+        const rows = solids();
+        const last = rows[rows.length - 1];
+        const key = itemKey(item);
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const items = stepItems(rows[i]);
+          const ix = items.findIndex((it) => {
+            if (key && itemKey(it) === key) return true;
+            if (item.path && (samePath(it.path, item.path) || samePath(it.detail, item.path))) return true;
+            if (item.detail && (samePath(it.path, item.detail) || it.detail === item.detail)) return true;
+            return false;
+          });
+          if (ix < 0) continue;
+          items[ix] = Object.assign({}, items[ix], item, {
+            path: items[ix].path || item.path,
+            detail: items[ix].detail || item.detail,
+          });
+          apply(rows[i], step, items);
+          return;
+        }
+        if (empty) {
+          const same = last && last.dataset.kind === step.kind ? last
+            : [...rows].reverse().find((r) => r.dataset.kind === step.kind);
+          if (same) {
+            apply(same, step, stepItems(same));
+            return;
+          }
+          if (step.status === "running") return;
+        }
+        if (last && canMerge(last, step)) {
+          const items = stepItems(last);
+          items.push(item);
+          apply(last, step, items);
+          return;
+        }
+        const row = document.createElement("div");
+        paintStep(row, step, empty ? [] : [item]);
         place(row);
       },
       stop(ok) {
         clearInterval(iv);
         const spent = fmtElapsed(Date.now() - t0);
+        solids().forEach((el) => {
+          if (el.dataset.kind === "retry") {
+            if (ok !== false) el.remove();
+            return;
+          }
+          if (!el.classList.contains("running")) return;
+          const items = stepItems(el).map((it) => Object.assign({}, it, { status: "ok" }));
+          const verb = (el.querySelector(".verb") || {}).textContent || "";
+          paintStep(el, { kind: el.dataset.kind, status: "ok", label: verb }, items);
+        });
         if (ok === false) {
           live.className = "step live warn";
-          live.innerHTML = '<span class="ico" aria-hidden="true">' + STEP_ICO.retry + "</span>" +
-            '<span class="lab">Stopped · ' + spent + "</span>";
+          live.innerHTML = '<div class="spine"><span class="ico-face ico-kind" aria-hidden="true">' +
+            STEP_ICO.retry + "</span></div>" +
+            '<span class="lab"><span class="verb">Stopped</span><span class="num"> · ' + spent + "</span></span>";
         } else {
           live.remove();
         }
@@ -2027,8 +2254,6 @@
             bot.innerHTML = render(acc);
           } else if (ev.type === "step") {
             trail.push(ev);
-          } else if (ev.type === "activity" && ev.text) {
-            trail.push({ kind: "status", label: String(ev.text).slice(-80), status: "running" });
           } else if (ev.type === "tools" && ev.tools) {
             ev.tools.forEach((t) => trail.push({
               kind: "tool",
@@ -2231,6 +2456,20 @@
   });
 
   thread.addEventListener("click", (e) => {
+    const kid = e.target.closest(".kid[data-path]");
+    if (kid) {
+      const path = kid.getAttribute("data-path");
+      if (path) openFile(path);
+      return;
+    }
+    const fold = e.target.closest(".step.fold");
+    if (fold && fold.closest(".trail")) {
+      const open = fold.classList.toggle("open");
+      fold.querySelectorAll("[aria-expanded]").forEach((b) => {
+        b.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      return;
+    }
     const t = e.target.closest("[data-path]");
     if (!t) return;
     const path = t.getAttribute("data-path");

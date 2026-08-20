@@ -33,27 +33,39 @@ BRACKET_TOOL = re.compile(r"^\[([a-z0-9_]+)\]\s*(.*)$", re.I)
 SID_OK = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 TOOL_KIND = {
     "read": ("read", "Read"),
-    "write": ("write", "Wrote"),
-    "edit": ("write", "Edited"),
+    "read_file": ("read", "Read"),
+    "read_files": ("read", "Read"),
     "open_file": ("read", "Read"),
     "file_info": ("read", "Read"),
+    "cat": ("read", "Read"),
+    "write": ("write", "Wrote"),
+    "edit": ("write", "Edited"),
     "write_file": ("write", "Wrote"),
     "edit_file": ("write", "Edited"),
-    "delete_file": ("delete", "Deleted"),
+    "str_replace": ("write", "Edited"),
+    "apply_patch": ("write", "Edited"),
     "rename_file": ("write", "Renamed"),
     "copy_file": ("write", "Copied"),
+    "delete_file": ("delete", "Deleted"),
     "create_folder": ("list", "Created"),
     "list_files": ("list", "Listed"),
+    "list_dir": ("list", "Listed"),
+    "ls": ("list", "Listed"),
+    "glob": ("search", "Found"),
     "glob_files": ("search", "Found"),
+    "grep": ("search", "Searched"),
     "grep_files": ("search", "Searched"),
+    "rg": ("search", "Searched"),
     "semantic_search": ("search", "Searched"),
+    "search": ("search", "Searched"),
     "run_command": ("run", "Ran"),
     "bash": ("run", "Ran"),
     "shell": ("run", "Ran"),
+    "exec": ("run", "Ran"),
+    "command": ("run", "Ran"),
     "web_search": ("web", "Searched"),
     "web_fetch": ("web", "Fetched"),
     "fetch": ("web", "Fetched"),
-    "search": ("search", "Searched"),
     "subagent": ("agent", "Agent"),
     "vision": ("image", "Looked"),
     "ask_user_question": ("status", "Asked"),
@@ -136,9 +148,36 @@ def shorten(s: str, n: int = 72) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+LEAD_GLYPH = re.compile(r"^[^\w./~]+", re.UNICODE)
+PROGRESS = (
+    (re.compile(r"^(reading|read)\b\s*(.*)$", re.I), "read", "Read"),
+    (re.compile(r"^(listing|listed|list)\b\s*(.*)$", re.I), "list", "Listed"),
+    (re.compile(r"^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$", re.I), "write", "Edited"),
+    (re.compile(r"^(running|ran|executing|execute)\b(?:\s+command)?\s*(.*)$", re.I), "run", "Ran"),
+    (re.compile(r"^(searching|searched|search|grepping|grep)\b\s*(.*)$", re.I), "search", "Searched"),
+    (re.compile(r"^(loading|loaded)\s+(?:skill\s+)?(.*)$", re.I), "skill", "Loaded"),
+    (re.compile(r"^(viewing|viewed)\b\s*(.*)$", re.I), "image", "Viewed"),
+)
+
+
+def step_path(rest: str) -> str:
+    rest = (rest or "").strip().strip("\"'")
+    if not rest:
+        return ""
+    if rest in (".", "./"):
+        return "."
+    if " " in rest and "/" not in rest:
+        return ""
+    if any(ch in rest for ch in "/.\\") or re.match(r"^[\w.@-]+$", rest):
+        return rest[:240]
+    return ""
+
+
 def parse_step(line: str) -> dict | None:
     line = ANSI.sub("", line or "").strip()
     if not line or FXS_LINE.match(line):
+        return None
+    if line.startswith("{") or line.startswith("[{") or line.startswith('["'):
         return None
     if line.startswith("[notice]"):
         body = re.sub(r"^[⚠✓]\s*", "", line[8:].strip())
@@ -149,10 +188,7 @@ def parse_step(line: str) -> dict | None:
                 "label": "Model unavailable", "detail": "gave up", "status": "warn",
             }
         if "recovered" in low or "succeeded on attempt" in low:
-            return {
-                "type": "step", "id": "retry", "kind": "ok",
-                "label": "Model recovered", "status": "ok",
-            }
+            return None
         if "retrying" in low or "unavailable" in low or "503" in body:
             att = NOTICE_ATT.search(body)
             wait = NOTICE_WAIT.search(body)
@@ -163,39 +199,62 @@ def parse_step(line: str) -> dict | None:
                 "type": "step", "id": "retry", "kind": "retry",
                 "label": "Waiting on the model", "detail": detail, "status": "running",
             }
-        head = body.split("·")[0].strip()
-        return {
-            "type": "step", "kind": "status",
-            "label": shorten(head, 64), "status": "running",
-        }
+        return None
     m = BRACKET_TOOL.match(line)
     if m:
         raw = m.group(1).lower()
         rest = m.group(2).strip()
         kind, verb = TOOL_KIND.get(raw, ("tool", raw.replace("_", " ")))
-        path = rest if rest and (("/" in rest) or ("." in rest)) else ""
+        path = step_path(rest)
         label = f"{verb} {shorten(Path(rest).name if path else rest, 48)}".strip() if rest else verb
         return {
             "type": "step", "kind": kind, "label": label,
             "detail": rest, "path": path, "status": "running",
         }
-    if len(line) > 180:
-        line = line[-120:]
-    return {"type": "step", "kind": "status", "label": shorten(line, 64), "status": "running"}
-
+    had_lead = bool(LEAD_GLYPH.match(line))
+    line = LEAD_GLYPH.sub("", line).strip()
+    if not line:
+        return None
+    for rx, kind, verb in PROGRESS:
+        pm = rx.match(line)
+        if not pm:
+            continue
+        rest = (pm.group(2) or "").strip()
+        path = step_path(rest)
+        label = f"{verb} {shorten(Path(path).name if path and path != '.' else rest, 48)}".strip() if rest else verb
+        status = "running" if had_lead or not rest else "ok"
+        return {
+            "type": "step", "kind": kind, "label": label,
+            "detail": rest, "path": path, "status": status,
+        }
+    return None
 
 def tool_step(tcall) -> dict:
     if not isinstance(tcall, dict):
         name = str(tcall).strip()
         tcall = {"name": name}
-    name = str(tcall.get("name") or "tool").strip()
+    name = str(tcall.get("name") or tcall.get("tool_name") or "tool").strip()
     parts = name.split(None, 1)
     key = parts[0].lower().replace("-", "_")
     rest = parts[1] if len(parts) > 1 else ""
     kind, verb = TOOL_KIND.get(key, ("tool", key.replace("_", " ")))
-    path = str(tcall.get("path") or tcall.get("file") or tcall.get("target") or "")
-    cmd = str(tcall.get("command") or tcall.get("cmd") or "")
-    query = str(tcall.get("query") or tcall.get("pattern") or "")
+    args = tcall.get("arguments") or tcall.get("input") or {}
+    raw_args = tcall.get("arguments_json") or tcall.get("argumentsJson")
+    if isinstance(raw_args, str) and raw_args.strip():
+        try:
+            parsed = json.loads(raw_args)
+            if isinstance(parsed, dict):
+                args = parsed
+        except json.JSONDecodeError:
+            pass
+    if not isinstance(args, dict):
+        args = {}
+    path = str(
+        tcall.get("path") or tcall.get("file") or tcall.get("target")
+        or args.get("path") or args.get("file") or args.get("target") or args.get("dir") or ""
+    )
+    cmd = str(tcall.get("command") or tcall.get("cmd") or args.get("command") or args.get("cmd") or "")
+    query = str(tcall.get("query") or tcall.get("pattern") or args.get("query") or args.get("pattern") or "")
     extra = path or cmd or query or rest
     if extra and not path and ("/" in extra or "." in extra) and " " not in extra:
         path = extra
@@ -1094,9 +1153,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
+        q = shorten((prompt or "").splitlines()[0], 40)
+        emit(tool_step({"name": "grep_files", "query": q or "readme", "status": "ok"}))
+        time.sleep(0.05)
         if files:
             emit(tool_step({"name": "read_file", "path": files[0], "status": "ok"}))
-            time.sleep(0.08)
+            time.sleep(0.04)
+            if len(files) > 1:
+                emit(tool_step({"name": "read_file", "path": files[1], "status": "ok"}))
+                time.sleep(0.04)
+        emit(tool_step({"name": "run_command", "command": "fx status --json", "status": "ok"}))
+        time.sleep(0.04)
         readme = Path(ws) / "README.md"
         excerpt = ""
         if readme.is_file():
@@ -1120,7 +1187,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
         perm = clean_perm(perm)
-        base = ["ask", "--json"]
+        base = ["ask", "--json", "--no-color"]
         if perm == "yolo":
             base.append("--yolo")
         resume_flag: list[str] = []
@@ -1174,6 +1241,7 @@ class Handler(BaseHTTPRequestHandler):
 
             err_chunks: list[str] = []
             pending_steps = []
+            streamed_steps: list[dict] = []
 
             def pump_err() -> None:
                 assert proc.stderr is not None
@@ -1185,9 +1253,12 @@ class Handler(BaseHTTPRequestHandler):
                     step = parse_step(line)
                     if not step:
                         continue
+                    if step.get("status") == "running" and not (step.get("path") or step.get("detail")):
+                        continue
                     if resume_flag:
                         pending_steps.append(step)
                     else:
+                        streamed_steps.append(step)
                         emit(step)
 
             t = threading.Thread(target=pump_err, daemon=True)
@@ -1217,13 +1288,18 @@ class Handler(BaseHTTPRequestHandler):
 
         for step in pending_steps:
             emit(step)
+            streamed_steps.append(step)
         data = extract_json(raw_out) or extract_json(err_text)
         emitted = False
         if isinstance(data, dict):
             tools = data.get("tool_calls") or []
+            seen_kinds = {s.get("kind") for s in streamed_steps}
             if tools:
                 for tcall in tools:
-                    emit(tool_step(tcall))
+                    ts = tool_step(tcall)
+                    if not (ts.get("path") or ts.get("detail")) and ts.get("kind") in seen_kinds:
+                        continue
+                    emit(ts)
             if data.get("session_id"):
                 emit({"type": "session", "id": data["session_id"]})
             if data.get("model"):

@@ -142,6 +142,75 @@ class Sessions(unittest.TestCase):
         self.assertEqual(rows[0]["title"], "One")
 
 
+class Steps(unittest.TestCase):
+    def test_read_file_kind(self):
+        s = server.tool_step({"name": "read_file", "path": "README.md", "status": "ok"})
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "README.md")
+        self.assertEqual(s["status"], "ok")
+
+    def test_arguments_json_path(self):
+        s = server.tool_step({
+            "name": "read_file",
+            "arguments_json": '{"path":"web/app.js"}',
+            "status": "success",
+        })
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "web/app.js")
+        self.assertEqual(s["status"], "ok")
+
+    def test_run_command_kind(self):
+        s = server.tool_step({"name": "run_command", "command": "fx status --json"})
+        self.assertEqual(s["kind"], "run")
+        self.assertIn("fx status", s["detail"])
+
+    def test_grep_kind(self):
+        s = server.tool_step({"name": "grep_files", "query": "TOOL_KIND"})
+        self.assertEqual(s["kind"], "search")
+
+    def test_bracket_read(self):
+        s = server.parse_step("[read_file] web/app.js")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "web/app.js")
+
+    def test_recovered(self):
+        self.assertIsNone(server.parse_step("[notice] recovered on attempt 3"))
+
+    def test_progress_reading(self):
+        s = server.parse_step("● Reading README.md")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "README.md")
+        self.assertEqual(s["status"], "running")
+
+    def test_progress_reading_done(self):
+        s = server.parse_step("Reading README.md")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "README.md")
+        self.assertEqual(s["status"], "ok")
+
+    def test_progress_listing(self):
+        s = server.parse_step("Listing web")
+        self.assertEqual(s["kind"], "list")
+        self.assertEqual(s["path"], "web")
+        self.assertEqual(s["status"], "ok")
+
+    def test_progress_listing_running(self):
+        s = server.parse_step("● Listing web")
+        self.assertEqual(s["kind"], "list")
+        self.assertEqual(s["status"], "running")
+        self.assertEqual(s["path"], "web")
+
+    def test_progress_pathless_dropped_into_kind(self):
+        s = server.parse_step("● Reading")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "")
+        self.assertEqual(s["status"], "running")
+
+    def test_noise_dropped(self):
+        self.assertIsNone(server.parse_step("Hi! What can I help you with?"))
+        self.assertIsNone(server.parse_step('{"type":"assistant"}'))
+        self.assertIsNone(server.parse_step("[notice] something else"))
+
 class ReleaseCopy(unittest.TestCase):
     def test_no_demo_in_ui_copy(self):
         here = Path(__file__).resolve().parent
