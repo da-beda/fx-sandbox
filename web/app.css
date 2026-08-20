@@ -160,6 +160,8 @@ textarea, input {
   inset: 0;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 18px;
   pointer-events: none;
   user-select: none;
   color: var(--muted);
@@ -168,7 +170,8 @@ textarea, input {
   letter-spacing: -0.022em;
   padding-bottom: 8vh;
 }
-.blank p { margin: 0; }
+.blank .mark { color: var(--fg); display: block; }
+.blank p { margin: 0; color: var(--muted); }
 .blank[hidden] { display: none; }
 
 .thread {

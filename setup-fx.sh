@@ -1698,7 +1698,7 @@ ensure_web_ui() {
   local base="${FX_UI_BASE:-https://raw.githubusercontent.com/da-beda/fx-sandbox/main/web}"
   mkdir -p "${dest}/web"
   local f
-  for f in index.html app.css app.js server.py; do
+  for f in index.html app.css app.js server.py favicon.svg mark.svg; do
     if [[ -s "${dest}/web/${f}" ]]; then
       continue
     fi

@@ -1,3 +1,7 @@
+<p>
+  <img src="web/mark.svg" alt="fxs" height="64">
+</p>
+
 # fx-sandbox
 
 Install [fx](https://fx.sh) (Vercel Labs’ coding agent) and, optionally,
