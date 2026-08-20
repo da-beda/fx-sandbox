@@ -1432,13 +1432,12 @@
     state.providerLabel = p.label || "";
     state.api = p.api && p.api !== "vercel" ? p.api : "auto";
     paintApi(p);
+    paintKeyRow(p, s.key);
     const urlRow = $("provider-url-row");
     if (urlRow) {
       urlRow.hidden = !p.url || p.id !== "custom";
       if (p.url && $("provider-url")) $("provider-url").value = p.url;
     }
-    const keyRow = $("key-row");
-    if (keyRow) keyRow.hidden = s.key !== false;
     set("diag-session", state.resume && state.resume !== "last" ? state.resume : "last");
     set("diag-docker", s.docker || "—");
     const bins = [];
@@ -1975,8 +1974,60 @@
     try { return new URL(url).host; } catch { return url || ""; }
   }
 
+  function pendingKey() {
+    const inp = $("key-input");
+    return (inp && inp.value.trim()) || "";
+  }
+
+  function paintKeyRow(p, hasKey) {
+    const keyRow = $("key-row");
+    if (!keyRow) return;
+    const cloud = !!(p && p.url && p.id !== "ollama" && p.id !== "lmstudio");
+    keyRow.hidden = !cloud;
+    const hint = $("key-hint");
+    if (hint) {
+      hint.textContent = hasKey
+        ? "Key is saved on this machine. Paste a new one to replace."
+        : "Save, Enter, or switch protocol. Kept on this machine, not in the project.";
+    }
+  }
+
+  async function saveKey(key) {
+    key = String(key || "").trim();
+    if (!key) return null;
+    const r = await fetch("/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const inp = $("key-input");
+    if (inp) inp.value = "";
+    if (data.provider) {
+      state.provider = data.provider;
+      if (data.label) state.providerLabel = data.label;
+    }
+    if (data.model) {
+      state.model = data.model;
+      state.modelLabel = modelName(data.model) || data.model;
+    }
+    if (data.warn) addMsg("sys", data.warn);
+    if (state.settingsPage === "provider") {
+      if (data.providers) paintProviders(data.providers);
+      paintApi(data);
+      paintKeyRow(data, data.key);
+    }
+    paintHome();
+    await loadModels();
+    await refreshStatus();
+    return data;
+  }
+
   async function setProvider(id, url) {
     const body = { provider: url || id };
+    const pending = pendingKey();
+    if (pending) body.key = pending;
     const r = await fetch("/api/provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1984,20 +2035,22 @@
     });
     const data = await r.json();
     if (data.error) throw new Error(data.error);
+    if (pending && $("key-input")) $("key-input").value = "";
     state.provider = data.id || id;
     state.providerLabel = data.label || id;
     if (data.model) {
       state.model = data.model;
       state.modelLabel = modelName(data.model) || data.model;
     }
+    if (data.warn) addMsg("sys", data.warn);
     if (state.settingsPage === "provider") {
       paintProviders(data.providers || []);
     }
     paintApi(data);
-    const keyRow = $("key-row");
+    paintKeyRow(data, data.key);
     const inp = $("key-input");
-    if (keyRow) keyRow.hidden = !data.needs_key;
     if (data.needs_key && inp) {
+      const keyRow = $("key-row");
       keyRow && keyRow.scrollIntoView({ block: "nearest" });
       inp.focus();
     }
@@ -2035,6 +2088,8 @@
     } else if (state.provider) {
       body.provider = state.provider;
     }
+    const pending = pendingKey();
+    if (pending) body.key = pending;
     const r = await fetch("/api/provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2042,7 +2097,14 @@
     });
     const data = await r.json();
     if (data.error) throw new Error(data.error);
+    if (pending && $("key-input")) $("key-input").value = "";
+    if (data.id) {
+      state.provider = data.id;
+      if (data.label) state.providerLabel = data.label;
+    }
+    if (data.warn) addMsg("sys", data.warn);
     paintApi(data);
+    paintKeyRow(data, data.key);
     await refreshStatus();
     return data;
   }
@@ -2677,19 +2739,18 @@
     keyInput.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault();
-      const key = keyInput.value.trim();
-      if (!key) return;
       try {
-        const r = await fetch("/api/key", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key }),
-        });
-        const data = await r.json();
-        if (data.error) throw new Error(data.error);
-        keyInput.value = "";
-        await loadModels();
-        await refreshStatus();
+        await saveKey(keyInput.value);
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const keySave = $("key-save");
+  if (keySave) {
+    keySave.addEventListener("click", async () => {
+      try {
+        await saveKey(pendingKey());
       } catch (err) {
         addMsg("sys", String(err.message || err));
       }

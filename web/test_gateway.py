@@ -486,12 +486,11 @@ class HTTP(unittest.TestCase):
             req.add_header("Content-Type", "application/json")
             req.add_header("ai-language-model-id", "m")
             req.add_header("ai-language-model-streaming", "true")
-            try:
-                urlopen(req, timeout=2)
-                self.fail("expected 401")
-            except HTTPError as e:
-                self.assertEqual(e.code, 401)
-                self.assertIn(b"bad key", e.read())
+            r = urlopen(req, timeout=2)
+            body = r.read()
+            self.assertIn(b'"type":"error"', body)
+            self.assertIn(b"Provider rejected the API key", body)
+            self.assertIn(b"bad key", body)
         finally:
             gw.shutdown(); up.shutdown()
             gw.server_close(); up.server_close()
@@ -517,7 +516,8 @@ class IsolatedApply(unittest.TestCase):
         for k in (
             "FX_UPSTREAM", "OPENAI_BASE_URL", "OPENAI_API_KEY", "FX_MODEL",
             "AI_GATEWAY_API_KEY", "FXS_UI_LOCAL", "OLLAMA_API_KEY",
-            "XAI_API_KEY", "GROQ_API_KEY", "FX_GATEWAY_BASE_URL",
+            "XAI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY",
+            "FX_GATEWAY_BASE_URL",
             "FX_GATEWAY_CHAT_URL", "FX_UPSTREAM_API",
         ):
             self.prev_env[k] = os.environ.pop(k, None)
@@ -620,6 +620,76 @@ class IsolatedApply(unittest.TestCase):
         self.assertEqual(info["url"], "http://127.0.0.1:11434/v1")
         self.assertFalse(info["needs_key"])
         self.assertEqual(info["effective_api"], "chat")
+
+
+    def test_apply_openrouter_defaults_chat(self):
+        out = gateway.apply_provider("openrouter")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertEqual(out["url"], "https://openrouter.ai/api/v1")
+        self.assertEqual(out["model"], "openai/gpt-4o")
+        self.assertTrue(out["needs_key"])
+        self.assertEqual(out["api"], "auto")
+        self.assertEqual(out["effective_api"], "chat")
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["FX_UPSTREAM"], "https://openrouter.ai/api/v1")
+        self.assertEqual(saved["AI_GATEWAY_API_KEY"], "local")
+        self.assertNotIn("OPENAI_API_KEY", saved)
+
+    def test_apply_openrouter_with_key(self):
+        out = gateway.apply_provider("openrouter", key="sk-or-v1-testkey")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertTrue(out["key"])
+        self.assertFalse(out.get("needs_key"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["OPENAI_API_KEY"], "sk-or-v1-testkey")
+        self.assertEqual(saved["AI_GATEWAY_API_KEY"], "local")
+
+    def test_store_sk_or_selects_openrouter(self):
+        out = gateway.store_api_key("sk-or-v1-pasted")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertTrue(out["key"])
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["OPENAI_API_KEY"], "sk-or-v1-pasted")
+        self.assertEqual(saved["FX_UPSTREAM"], "https://openrouter.ai/api/v1")
+
+    def test_apply_vercel_with_openrouter_key_switches(self):
+        out = gateway.apply_provider("vercel", key="sk-or-v1-from-chat")
+        self.assertEqual(out["id"], "openrouter")
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["OPENAI_API_KEY"], "sk-or-v1-from-chat")
+
+    def test_provider_from_key(self):
+        self.assertEqual(gateway.provider_from_key("vck_abc"), "vercel")
+        self.assertEqual(gateway.provider_from_key("sk-or-v1-abc"), "openrouter")
+        self.assertEqual(gateway.provider_from_key("xai-secret"), "xai")
+        self.assertEqual(gateway.provider_from_key("sk-proj-openai"), "")
+
+    def test_openrouter_env_key_is_read(self):
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-from-env"
+        self.assertEqual(gateway.api_key_from_env(), "sk-or-from-env")
+
+    def test_upstream_http_error_messages(self):
+        msg = gateway.upstream_http_error(
+            401, b'{"error":{"message":"No cookie auth credentials found"}}',
+        )
+        self.assertIn("Provider rejected the API key", msg)
+        self.assertIn("HTTP 401", msg)
+        self.assertIn("No cookie auth", msg)
+        msg = gateway.upstream_http_error(
+            403, b'{"error":{"message":"Key limit exceeded (total limit)"}}',
+        )
+        self.assertIn("Provider forbidden", msg)
+        self.assertIn("HTTP 403", msg)
+        self.assertIn("Key limit exceeded", msg)
+
+    def test_stamp_includes_key_fingerprint(self):
+        a = gateway._gateway_stamp("https://openrouter.ai/api/v1", "auto", "sk-or-a")
+        b = gateway._gateway_stamp("https://openrouter.ai/api/v1", "auto", "sk-or-b")
+        self.assertNotEqual(a, b)
+        self.assertTrue(gateway._stamp_matches(a, "https://openrouter.ai/api/v1", "auto", "sk-or-a"))
+        self.assertFalse(gateway._stamp_matches(a, "https://openrouter.ai/api/v1", "auto", "sk-or-b"))
+        old = "https://openrouter.ai/api/v1\nauto\n"
+        self.assertFalse(gateway._stamp_matches(old, "https://openrouter.ai/api/v1", "auto", "sk-or-a"))
 
     def test_cli_apply_api(self):
         import io

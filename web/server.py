@@ -1040,6 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
         name = str(payload.get("provider") or payload.get("url") or "").strip()
         model = str(payload.get("model") or "").strip()
         api = str(payload.get("api") or "").strip()
+        key = str(payload.get("key") or "").strip()
         if not name:
             if api:
                 cur = gateway.current_provider()
@@ -1048,7 +1049,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, gateway.current_provider())
                 return
         try:
-            info = gateway.apply_provider(name, model, api=api)
+            info = gateway.apply_provider(name, model, api=api, key=key)
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return
@@ -1068,7 +1069,28 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return
-        self._json(200, {"ok": True, "key": bool(info.get("key")), "provider": info.get("id")})
+        global MODEL
+        if info.get("model"):
+            MODEL = info["model"]
+            os.environ["FX_MODEL"] = MODEL
+        body = {
+            "ok": True,
+            "key": bool(info.get("key")),
+            "saved": True,
+            "provider": info.get("id"),
+            "id": info.get("id"),
+            "label": info.get("label"),
+            "model": info.get("model"),
+            "needs_key": info.get("needs_key"),
+            "url": info.get("url"),
+            "vercel": info.get("vercel"),
+            "api": info.get("api"),
+            "effective_api": info.get("effective_api"),
+            "providers": info.get("providers"),
+        }
+        if info.get("warn"):
+            body["warn"] = info["warn"]
+        self._json(200, body)
 
     def _fx(self, payload: dict) -> None:
         args = payload.get("args")
@@ -1212,6 +1234,14 @@ class Handler(BaseHTTPRequestHandler):
         proc = None
         pending_steps: list[dict] = []
         attempt_resume = bool(resume_flag)
+        if not local_mode() and gateway.configured_upstream():
+            try:
+                gateway.load_env_file()
+                gateway.ensure_gateway()
+            except Exception as e:
+                emit({"type": "error", "text": str(e)})
+                emit({"type": "done"})
+                return
         while True:
             fx_args = base + resume_flag + img_flags + ["--", prompt]
             try:

@@ -15,6 +15,7 @@ stays on /v1/chat/completions; auto falls back if /responses is missing.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -163,10 +164,24 @@ def upsert_env(updates: dict[str, Optional[str]], path: Optional[Path] = None) -
 
 
 def api_key_from_env(getenv: Callable[[str], str] = lambda k: os.environ.get(k, "")) -> str:
-    for k in ("OPENAI_API_KEY", "OLLAMA_API_KEY", "XAI_API_KEY", "GROQ_API_KEY"):
+    for k in (
+        "OPENAI_API_KEY", "OPENROUTER_API_KEY", "OLLAMA_API_KEY",
+        "XAI_API_KEY", "GROQ_API_KEY",
+    ):
         v = getenv(k)
         if v:
             return v
+    return ""
+
+
+def provider_from_key(key: str) -> str:
+    k = (key or "").strip()
+    if k.startswith("vck_"):
+        return "vercel"
+    if k.startswith("sk-or-"):
+        return "openrouter"
+    if k.startswith("xai-"):
+        return "xai"
     return ""
 
 
@@ -252,6 +267,36 @@ def provider_id_for(url: str) -> str:
 
 def provider_needs_key(pid: str) -> bool:
     return pid not in ("vercel", "") and pid not in LOCAL_PROVIDERS
+
+
+def upstream_http_error(code: int, body: bytes) -> str:
+    text = (body or b"").decode("utf-8", errors="replace")
+    msg = ""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = None
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict):
+            msg = str(err.get("message") or err.get("code") or "")
+        elif isinstance(err, str):
+            msg = err
+        elif data.get("message"):
+            msg = str(data.get("message"))
+    if not msg:
+        line = text.strip().splitlines()[0] if text.strip() else ""
+        msg = line[:240]
+    msg = " ".join(str(msg).split())
+    if code == 401:
+        prefix = "Provider rejected the API key"
+    elif code == 403:
+        prefix = "Provider forbidden"
+    elif code == 429:
+        prefix = "Provider rate-limited"
+    else:
+        prefix = "Provider error"
+    return f"{prefix} (HTTP {code})" + (f". {msg}" if msg else "")
 
 
 def suggest_model(pid: str, current: str = "", catalog: Optional[list[str]] = None) -> str:
@@ -1249,8 +1294,21 @@ class GatewayHandler(BaseHTTPRequestHandler):
             code = getattr(resp, "status", None) or getattr(resp, "code", 200)
             if code != 200:
                 body = resp.read()
-                ctype = resp.headers.get("Content-Type") if hasattr(resp.headers, "get") else "application/json"
-                self._send(code, body, ctype or "application/json")
+                msg = upstream_http_error(code, body)
+                if stream:
+                    try:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+                    conv: Stream = Stream()
+                    self._write_events(conv.fail(msg))
+                    self.close_connection = True
+                    return
+                self._json(502, {"error": msg})
                 return
             if not stream:
                 body = resp.read()
@@ -1397,15 +1455,25 @@ def stop_gateway(listen: str = LISTEN_DEFAULT) -> None:
         pass
 
 
-def _gateway_stamp(upstream: str, api: str) -> str:
-    return f"{upstream.rstrip('/')}\n{api}\n"
+def _gateway_stamp(upstream: str, api: str, api_key: str = "") -> str:
+    return f"{upstream.rstrip('/')}\n{api}\n{_key_fp(api_key)}\n"
 
 
-def _stamp_matches(text: str, upstream: str, api: str) -> bool:
+def _key_fp(key: str) -> str:
+    if not key:
+        return "-"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _stamp_matches(text: str, upstream: str, api: str, api_key: str = "") -> bool:
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
-    if len(lines) < 2:
+    if len(lines) < 3:
         return False
-    return lines[0].rstrip("/") == upstream.rstrip("/") and lines[1] == api
+    return (
+        lines[0].rstrip("/") == upstream.rstrip("/")
+        and lines[1] == api
+        and lines[2] == _key_fp(api_key)
+    )
 
 
 def ensure_gateway(
@@ -1424,8 +1492,13 @@ def ensure_gateway(
         api = normalize_api(api or configured_api())
     except ValueError:
         api = "auto"
-    api_key = api_key or api_key_from_env() or "ollama"
-    stamp = _gateway_stamp(upstream, api)
+    api_key = api_key or api_key_from_env()
+    pid = provider_id_for(upstream)
+    if provider_needs_key(pid) and not api_key:
+        label = PROVIDER_BY_ID.get(pid, {}).get("label") or pid
+        raise RuntimeError(f"{label} needs an API key")
+    api_key = api_key or "ollama"
+    stamp = _gateway_stamp(upstream, api, api_key)
     if healthz_ok(listen):
         want = ""
         if UPSTREAM_STAMP.is_file():
@@ -1433,7 +1506,7 @@ def ensure_gateway(
                 want = UPSTREAM_STAMP.read_text(encoding="utf-8")
             except OSError:
                 want = ""
-        if _stamp_matches(want, upstream, api):
+        if _stamp_matches(want, upstream, api, api_key):
             os.environ["FX_GATEWAY_BASE_URL"] = "http://" + listen
             os.environ["FX_GATEWAY_CHAT_URL"] = "http://" + listen + "/v3/ai/language-model"
             os.environ.setdefault("AI_GATEWAY_API_KEY", "local")
@@ -1520,54 +1593,71 @@ def store_api_key(key: str) -> dict[str, Any]:
     if not key:
         raise ValueError("empty key")
     load_env_file()
-    if key.startswith("vck_"):
+    hint = provider_from_key(key)
+    if hint == "vercel" or key.startswith("vck_"):
         upsert_env({
             "AI_GATEWAY_API_KEY": key,
             "OPENAI_API_KEY": None,
+            "OPENROUTER_API_KEY": None,
             "FX_UPSTREAM": None,
             "OPENAI_BASE_URL": None,
             "FX_UPSTREAM_API": None,
+            "FX_GATEWAY_BASE_URL": None,
+            "FX_GATEWAY_CHAT_URL": None,
         })
         os.environ["AI_GATEWAY_API_KEY"] = key
-        os.environ.pop("OPENAI_API_KEY", None)
-        os.environ.pop("FX_UPSTREAM", None)
-        os.environ.pop("OPENAI_BASE_URL", None)
-        os.environ.pop("FX_UPSTREAM_API", None)
+        for k in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "FX_UPSTREAM", "OPENAI_BASE_URL",
+                  "FX_UPSTREAM_API", "FX_GATEWAY_BASE_URL", "FX_GATEWAY_CHAT_URL"):
+            os.environ.pop(k, None)
         stop_gateway()
-    else:
-        updates: dict[str, Optional[str]] = {
-            "OPENAI_API_KEY": key,
-            "AI_GATEWAY_API_KEY": os.environ.get("AI_GATEWAY_API_KEY") or "local",
-        }
-        if updates["AI_GATEWAY_API_KEY"] == "local" or str(updates["AI_GATEWAY_API_KEY"]).startswith("vck_"):
-            updates["AI_GATEWAY_API_KEY"] = "local"
-        upsert_env(updates)
-        os.environ["OPENAI_API_KEY"] = key
-        os.environ["AI_GATEWAY_API_KEY"] = updates["AI_GATEWAY_API_KEY"] or "local"
-        stop_gateway()
-        offline = os.environ.get("FXS_UI_LOCAL", "") in ("1", "true", "yes")
-        if configured_upstream() and not offline:
-            try:
-                ensure_gateway()
-            except Exception:
-                pass
+        out = current_provider()
+        out["saved"] = True
+        return out
+    updates: dict[str, Optional[str]] = {
+        "OPENAI_API_KEY": key,
+        "AI_GATEWAY_API_KEY": "local",
+    }
+    upsert_env(updates)
+    os.environ["OPENAI_API_KEY"] = key
+    os.environ["AI_GATEWAY_API_KEY"] = "local"
+    cur_id = provider_id_for(configured_upstream())
+    if hint and hint not in ("", "vercel") and cur_id != hint:
+        return apply_provider(hint, key=key)
+    stop_gateway()
+    offline = os.environ.get("FXS_UI_LOCAL", "") in ("1", "true", "yes")
+    warn = ""
+    if configured_upstream() and not offline:
+        try:
+            ensure_gateway()
+        except Exception as e:
+            warn = str(e)
     out = current_provider()
     out["saved"] = True
+    if warn:
+        out["warn"] = warn
     return out
 
 
-def apply_provider(name_or_url: str, model: str = "", api: str = "") -> dict[str, Any]:
+def apply_provider(name_or_url: str, model: str = "", api: str = "", key: str = "") -> dict[str, Any]:
+    key = (key or "").strip()
+    hint = provider_from_key(key)
+    if hint == "vercel" or key.startswith("vck_"):
+        return store_api_key(key)
     spec = resolve_provider(name_or_url)
+    if hint and spec["id"] in ("vercel", "") and hint not in ("vercel", ""):
+        return apply_provider(hint, model=model, api=api, key=key)
     load_env_file()
     current_model = os.environ.get("FX_MODEL", "")
     updates: dict[str, Optional[str]] = {
         "FX_UPSTREAM": spec["url"] or None,
         "OPENAI_BASE_URL": spec["url"] or None,
     }
+    if key:
+        updates["OPENAI_API_KEY"] = key
     if spec["url"]:
         current = parse_env_file()
-        key = current.get("AI_GATEWAY_API_KEY", "")
-        if not key or key.startswith("vck_"):
+        gw_key = current.get("AI_GATEWAY_API_KEY", "")
+        if not gw_key or gw_key.startswith("vck_"):
             updates["AI_GATEWAY_API_KEY"] = "local"
         if api:
             updates["FX_UPSTREAM_API"] = normalize_api(api)
@@ -1576,6 +1666,8 @@ def apply_provider(name_or_url: str, model: str = "", api: str = "") -> dict[str
         if current.get("AI_GATEWAY_API_KEY") == "local":
             updates["AI_GATEWAY_API_KEY"] = None
         updates["FX_UPSTREAM_API"] = None
+        updates["FX_GATEWAY_BASE_URL"] = None
+        updates["FX_GATEWAY_CHAT_URL"] = None
     picked = (model or "").strip() or suggest_model(spec["id"], current_model)
     if picked:
         updates["FX_MODEL"] = picked
@@ -1589,6 +1681,9 @@ def apply_provider(name_or_url: str, model: str = "", api: str = "") -> dict[str
     probe = bool(spec["url"]) and not offline
     if probe and provider_needs_key(spec["id"]) and not api_key_from_env():
         probe = False
+        stop_gateway()
+        os.environ.pop("FX_GATEWAY_BASE_URL", None)
+        os.environ.pop("FX_GATEWAY_CHAT_URL", None)
     if probe:
         try:
             ensure_gateway(upstream=spec["url"], api=api or configured_api())
@@ -1603,9 +1698,10 @@ def apply_provider(name_or_url: str, model: str = "", api: str = "") -> dict[str
             spec = dict(spec)
             spec["warn"] = str(e)
     else:
-        stop_gateway()
-        os.environ.pop("FX_GATEWAY_BASE_URL", None)
-        os.environ.pop("FX_GATEWAY_CHAT_URL", None)
+        if not spec["url"]:
+            stop_gateway()
+            os.environ.pop("FX_GATEWAY_BASE_URL", None)
+            os.environ.pop("FX_GATEWAY_CHAT_URL", None)
     out = current_provider()
     if spec.get("warn"):
         out["warn"] = spec["warn"]

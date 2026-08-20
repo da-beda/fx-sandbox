@@ -294,11 +294,14 @@
                 </div>
                 <div class="set-stack" id="key-row" hidden>
                   <span class="set-k">API key</span>
-                  <label class="set-field">
-                    <span class="vh">API key</span>
-                    <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="vck_… or sk-… / xai-…">
-                  </label>
-                  <p class="set-hint">Enter to save. Kept on this machine, not in the project.</p>
+                  <div class="key-save-row">
+                    <label class="set-field">
+                      <span class="vh">API key</span>
+                      <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="sk-or-v1-… / vck_… / xai-…">
+                    </label>
+                    <button type="button" class="text-btn" id="key-save">Save</button>
+                  </div>
+                  <p class="set-hint" id="key-hint">Save, Enter, or switch protocol. Kept on this machine, not in the project.</p>
                 </div>
                 <div class="set-stack" id="provider-url-row" hidden>
                   <span class="set-k">Custom URL</span>

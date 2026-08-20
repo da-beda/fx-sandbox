@@ -888,6 +888,17 @@ button.kid:hover { color: var(--fg); cursor: pointer; }
   padding: 8px 8px 4px;
 }
 .set-stack > .set-k { padding: 0; }
+.key-save-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.key-save-row .set-field { flex: 1; min-width: 0; }
+.key-save-row .text-btn {
+  flex-shrink: 0;
+  min-height: 38px;
+  padding: 0 14px;
+}
 .set-hint {
   margin: 0;
   font-size: 12px;
