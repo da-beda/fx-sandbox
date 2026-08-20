@@ -156,7 +156,6 @@ textarea, input {
   height: 80px;
   overflow: visible;
 }
-.blank p { margin: 0; color: var(--muted); }
 .blank[hidden] { display: none; }
 
 .thread {
