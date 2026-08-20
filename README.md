@@ -115,7 +115,7 @@ fxs ui
 
 Opens a local page. No npm. Python 3 stdlib. `python3 web/test_server.py` covers the live-path helpers.
 
-Chat in the middle. A collapsible **Files** sidebar on the right is the workspace the agent sees — click a file to edit it in that same pane, chevron to go back to the tree.
+Chat in the middle. While the agent runs, a quiet activity trail shows what it is doing (reads, commands, waits) and how long it has been working — so a long turn never looks stuck. A collapsible **Files** sidebar on the right is the workspace the agent sees — click a file to edit it in that same pane, chevron to go back to the tree.
 
 `⌘B` files, `⌘S` save, `⌘P` filter, `⌘N` new chat, `⌘,` settings. Type `/` for commands, `@` for files (⇧Enter opens). Tool chips and `@path` in replies open the editor.
 

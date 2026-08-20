@@ -21,6 +21,27 @@
     file: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2.5h4.2L13 6.3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3"/><path d="M9.2 2.5V6.2H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
     image: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.5" width="11" height="9" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="m4.5 10.5 2.2-2.4 2 2.1 1.3-1.2 1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="6.4" r="0.8" fill="currentColor"/></svg>',
   };
+  const STEP_ICO = {
+    read: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2.5h4.2L13 6.3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3"/><path d="M9.2 2.5V6.2H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+    write: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 12.5 11.2 4.8a1.2 1.2 0 0 1 1.7 1.7L5.2 14.2H3.5v-1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="m10.4 4.1 1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+    search: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3"/><path d="m10.2 10.2 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+    run: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.2" width="11" height="9.6" rx="1.6" stroke="currentColor" stroke-width="1.3"/><path d="m6 6.2 3 1.8-3 1.8V6.2Z" fill="currentColor"/></svg>',
+    web: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><path d="M3 8h10M8 3c1.6 1.8 2.4 3.6 2.4 5S9.6 11.2 8 13C6.4 11.2 5.6 9.4 5.6 8S6.4 4.8 8 3Z" stroke="currentColor" stroke-width="1.2"/></svg>',
+    retry: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><path d="M8 5.2V8l1.8 1.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    list: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.2 1.5h5.2A1.2 1.2 0 0 1 13.7 5.7v6.1A1.2 1.2 0 0 1 12.5 13H3.7A1.2 1.2 0 0 1 2.5 11.8V4.2Z" stroke="currentColor" stroke-width="1.3"/></svg>',
+    delete: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 4.5h9M6.2 4.5V3.4A.9.9 0 0 1 7.1 2.5h1.8a.9.9 0 0 1 .9.9v1.1M12.2 4.5l-.5 8.1a1 1 0 0 1-1 1H5.3a1 1 0 0 1-1-1l-.5-8.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+    ok: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="m3.8 8.2 2.8 2.8 5.6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    agent: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>',
+    image: ICO.image,
+    skill: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="m8 2.5 1.5 4.1H14L10.8 9.2l1.4 4.3L8 10.8 3.8 13.5l1.4-4.3L2 6.6h4.5L8 2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+    status: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/></svg>',
+    tool: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 11.5 11.5 4M6.5 4H4v2.5M9.5 12H12V9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  };
+  const GROUP_NOUN = {
+    read: ["file", "files"], write: ["file", "files"], search: ["search", "searches"],
+    run: ["command", "commands"], web: ["page", "pages"], list: ["folder", "folders"],
+    delete: ["file", "files"], tool: ["tool", "tools"],
+  };
   const IMG_EXT = /\.(png|jpe?g|webp|gif)$/i;
 
   const state = {
@@ -644,6 +665,102 @@
     return el;
   }
 
+  function fmtElapsed(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return s + "s";
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m + "m " + String(r).padStart(2, "0") + "s";
+  }
+
+  function groupLabel(kind, n) {
+    const pair = GROUP_NOUN[kind] || ["step", "steps"];
+    const noun = n === 1 ? pair[0] : pair[1];
+    const verb = { read: "Read", write: "Edited", search: "Searched", run: "Ran",
+      web: "Fetched", list: "Listed", delete: "Deleted" }[kind] || "Used";
+    return verb + " " + n + " " + noun;
+  }
+
+  function paintStep(el, step) {
+    const kind = step.kind || "status";
+    const ico = STEP_ICO[kind] || (step.status === "ok" ? STEP_ICO.ok : STEP_ICO.status);
+    el.className = "step" + (step.status === "running" ? " running" : "") +
+      (step.status === "warn" ? " warn" : "") + (step.status === "ok" ? " ok" : "");
+    el.dataset.kind = kind;
+    el.dataset.status = step.status || "";
+    if (step.id) el.dataset.id = step.id;
+    if (step.path) el.dataset.path = step.path;
+    else el.removeAttribute("data-path");
+    const tag = step.path ? "button" : "div";
+    if (el.tagName.toLowerCase() !== tag) {
+      /* keep as div; button type set below */
+    }
+    if (step.path) el.setAttribute("type", "button");
+    const text = (step.label || "") +
+      (kind === "retry" && step.detail ? " · " + step.detail : "");
+    el.innerHTML = '<span class="ico" aria-hidden="true">' + ico + "</span>" +
+      '<span class="lab">' + esc(text) + "</span>";
+  }
+
+  function startTrail() {
+    const trail = document.createElement("div");
+    trail.className = "trail";
+    trail.setAttribute("aria-live", "polite");
+    thread.appendChild(trail);
+    const live = document.createElement("div");
+    live.className = "step live running";
+    live.innerHTML = '<span class="ico pulse" aria-hidden="true"></span>' +
+      '<span class="lab">Working · 0s</span>';
+    trail.appendChild(live);
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      const lab = live.querySelector(".lab");
+      if (lab) lab.textContent = "Working · " + fmtElapsed(Date.now() - t0);
+    }, 1000);
+    function place(el) {
+      trail.insertBefore(el, live);
+    }
+    return {
+      el: trail,
+      push(step) {
+        if (!step || !step.label) return;
+        if (step.id) {
+          const existing = trail.querySelector('.step[data-id="' + step.id + '"]');
+          if (existing) { paintStep(existing, step); return; }
+        }
+        if (step.status === "ok") {
+          const rows = [...trail.querySelectorAll(".step:not(.live)")];
+          const last = rows[rows.length - 1];
+          if (last && last.dataset.kind === step.kind && last.dataset.status === "ok" && !step.id) {
+            const n = (parseInt(last.dataset.n || "1", 10) + 1);
+            last.dataset.n = String(n);
+            const lab = last.querySelector(".lab");
+            if (lab) lab.innerHTML = esc(groupLabel(step.kind, n));
+            if (step.path) last.dataset.path = step.path;
+            return;
+          }
+        }
+        const row = document.createElement(step.path ? "button" : "div");
+        if (step.path) row.type = "button";
+        row.dataset.n = "1";
+        paintStep(row, step);
+        place(row);
+      },
+      stop(ok) {
+        clearInterval(iv);
+        const spent = fmtElapsed(Date.now() - t0);
+        if (ok === false) {
+          live.className = "step live warn";
+          live.innerHTML = '<span class="ico" aria-hidden="true">' + STEP_ICO.retry + "</span>" +
+            '<span class="lab">Stopped · ' + spent + "</span>";
+        } else {
+          live.remove();
+        }
+        if (!trail.querySelector(".step")) trail.remove();
+      },
+    };
+  }
+
   function toolsHtml(tools) {
     return tools.map((t) => {
       const name = t.name || t;
@@ -868,9 +985,12 @@
     state.history = state.history.slice(0, 40);
     localStorage.setItem("fxs.history", JSON.stringify(state.history));
     state.histIdx = -1;
+    const trail = startTrail();
     const bot = addMsg("assistant", "");
+    bot.hidden = true;
     bot.classList.add("pending");
     let acc = "";
+    let failed = false;
     const ac = new AbortController();
     state.abort = ac;
 
@@ -903,11 +1023,20 @@
           try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
           if (ev.type === "token") {
             acc += ev.text || "";
+            bot.hidden = false;
             bot.classList.remove("pending");
             bot.innerHTML = render(acc);
+          } else if (ev.type === "step") {
+            trail.push(ev);
+          } else if (ev.type === "activity" && ev.text) {
+            trail.push({ kind: "status", label: String(ev.text).slice(-80), status: "running" });
           } else if (ev.type === "tools" && ev.tools) {
-            const row = addMsg("tools", toolsHtml(ev.tools));
-            thread.insertBefore(row, bot);
+            ev.tools.forEach((t) => trail.push({
+              kind: "tool",
+              label: t.name || t,
+              path: pathFromChip(t.name || t),
+              status: "ok",
+            }));
           } else if (ev.type === "session" && ev.id) {
             state.resume = ev.id;
             localStorage.setItem("fxs.resume", ev.id);
@@ -915,6 +1044,8 @@
             state.model = ev.id;
             $("model-val").textContent = modelName(ev.id);
           } else if (ev.type === "error") {
+            failed = true;
+            bot.hidden = false;
             bot.classList.add("err");
             if (!acc) acc = ev.text || "failed";
             bot.innerHTML = render(acc);
@@ -924,11 +1055,15 @@
       }
     } catch (e) {
       if (e.name !== "AbortError" && !acc) {
+        failed = true;
+        bot.hidden = false;
         bot.classList.add("err");
         bot.textContent = String(e.message || e);
       }
     } finally {
+      trail.stop(!failed && !!acc);
       bot.classList.remove("pending");
+      if (!acc && bot.hidden) bot.remove();
       setBusy(false);
       state.abort = null;
       promptEl.focus();
