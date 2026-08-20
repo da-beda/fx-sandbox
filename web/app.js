@@ -723,25 +723,11 @@
     promptEl.focus();
   }
 
-  function playMark() {
-    const mark = document.querySelector(".brand .mark");
-    if (!mark) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    mark.querySelectorAll(".shimmer-band").forEach((el) => {
-      el.classList.remove("is-playing");
-      void el.getBoundingClientRect();
-      el.classList.add("is-playing");
-    });
-  }
-
   let chromeAnims = [];
   function morphChrome(open) {
     const body = document.body;
     const wantWelcome = !open;
-    if (body.classList.contains("welcome") === wantWelcome) {
-      if (wantWelcome) playMark();
-      return;
-    }
+    if (body.classList.contains("welcome") === wantWelcome) return;
     const brand = $("brand");
     const dock = document.querySelector(".dock");
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -749,7 +735,6 @@
     chromeAnims = [];
     if (reduced || !brand || !dock) {
       body.classList.toggle("welcome", wantWelcome);
-      playMark();
       return;
     }
     const firstB = brand.getBoundingClientRect();
@@ -779,10 +764,7 @@
       { duration: 520, easing: ease, delay: 20, fill: "both" }
     );
     chromeAnims = [bAnim, dAnim];
-    const done = () => {
-      chromeAnims = [];
-      playMark();
-    };
+    const done = () => { chromeAnims = []; };
     Promise.all([bAnim.finished, dAnim.finished]).then(done).catch(done);
   }
   function openChrome() { morphChrome(true); }
@@ -1209,10 +1191,4 @@
     veil.hidden = !(state.filesOn && mobile());
   });
   promptEl.focus();
-  const brand = $("brand");
-  if (brand) {
-    brand.addEventListener("pointerenter", playMark);
-    brand.addEventListener("click", playMark);
-  }
-  requestAnimationFrame(() => setTimeout(playMark, 280));
 })();
