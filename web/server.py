@@ -720,6 +720,28 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
                 rel = (qs.get("path") or [""])[0]
+                if (qs.get("raw") or ["0"])[0] in ("1", "true", "yes"):
+                    p = resolve_in_ws(ws, rel)
+                    if not p.is_file():
+                        self._send(404, b"not found", "text/plain")
+                        return
+                    ext = p.suffix.lower()
+                    if ext not in IMAGE_EXT:
+                        self._send(404, b"not found", "text/plain")
+                        return
+                    size = int(p.stat().st_size)
+                    if size > MAX_IMAGE:
+                        self._send(413, b"too large", "text/plain")
+                        return
+                    mime = {
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".webp": "image/webp",
+                        ".gif": "image/gif",
+                    }[ext]
+                    self._send(200, p.read_bytes(), mime)
+                    return
                 self._json(200, read_workspace_file(ws, rel))
             except (ValueError, OSError) as e:
                 self._json(400, {"error": str(e)})
