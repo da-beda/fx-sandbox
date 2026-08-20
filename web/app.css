@@ -425,9 +425,9 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   margin-inline-start: -6px;
-  padding: 2px 2px 4px;
+  padding: 4px 2px 8px;
 }
 .step {
   position: relative;
@@ -449,37 +449,31 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   align-self: stretch;
   display: flex;
   justify-content: center;
+  pointer-events: none;
 }
-.step:not(:first-child) .spine::before,
-.step:not(:last-child) .spine::after {
+.step:not(:last-child):not(:has(+ .step.live)) .spine::after {
   content: "";
   position: absolute;
   left: 13.5px;
+  top: 22px;
+  bottom: -10px;
   width: 1px;
-  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  border-radius: 1px;
   pointer-events: none;
 }
-.step:not(:first-child) .spine::before {
-  top: -4px;
-  height: 5px;
-  border-radius: 0 0 1px 1px;
-}
-.step:not(:last-child) .spine::after {
-  top: 23px;
-  bottom: -4px;
-  border-radius: 1px 1px 0 0;
-}
-.step.live:not(:first-child) .spine::before { content: none; }
-.step.live .spine::after { content: none; }
-.step:has(+ .step.live) .spine::after { content: none; }
 .ico-btn {
   position: relative;
   z-index: 2;
   width: 24px;
   height: 24px;
   margin-top: 0;
-  color: var(--subtle);
+  padding: 0;
+  border: 0;
+  color: var(--muted);
   background: var(--bg);
+  pointer-events: auto;
+  cursor: pointer;
 }
 .ico-face {
   position: absolute;

@@ -148,9 +148,38 @@ def shorten(s: str, n: int = 72) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+LEAD_GLYPH = re.compile(
+    r"^[\s\-|*·•●○◉◎◐◑◒◓✓✔▸►▶▷⬤⏺⚫⚪∙⋅\u2800-\u28FF\u25A0-\u25CF]+"
+)
+PROGRESS = (
+    (re.compile(r"^(reading|read)\b\s*(.*)$", re.I), "read", "Read"),
+    (re.compile(r"^(listing|listed|list)\b\s*(.*)$", re.I), "list", "Listed"),
+    (re.compile(r"^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$", re.I), "write", "Edited"),
+    (re.compile(r"^(running|ran|executing|execute)\b(?:\s+command)?\s*(.*)$", re.I), "run", "Ran"),
+    (re.compile(r"^(searching|searched|search|grepping|grep)\b\s*(.*)$", re.I), "search", "Searched"),
+    (re.compile(r"^(loading|loaded)\s+(?:skill\s+)?(.*)$", re.I), "skill", "Loaded"),
+    (re.compile(r"^(viewing|viewed)\b\s*(.*)$", re.I), "image", "Viewed"),
+)
+
+
+def step_path(rest: str) -> str:
+    rest = (rest or "").strip().strip("\"'")
+    if not rest:
+        return ""
+    if rest in (".", "./"):
+        return "."
+    if " " in rest and "/" not in rest:
+        return ""
+    if any(ch in rest for ch in "/.\\") or re.match(r"^[\w.@-]+$", rest):
+        return rest[:240]
+    return ""
+
+
 def parse_step(line: str) -> dict | None:
     line = ANSI.sub("", line or "").strip()
     if not line or FXS_LINE.match(line):
+        return None
+    if line.startswith("{") or line.startswith("[{") or line.startswith('["'):
         return None
     if line.startswith("[notice]"):
         body = re.sub(r"^[⚠✓]\s*", "", line[8:].strip())
@@ -161,10 +190,7 @@ def parse_step(line: str) -> dict | None:
                 "label": "Model unavailable", "detail": "gave up", "status": "warn",
             }
         if "recovered" in low or "succeeded on attempt" in low:
-            return {
-                "type": "step", "id": "retry", "kind": "ok",
-                "label": "Model recovered", "status": "ok",
-            }
+            return None
         if "retrying" in low or "unavailable" in low or "503" in body:
             att = NOTICE_ATT.search(body)
             wait = NOTICE_WAIT.search(body)
@@ -175,26 +201,35 @@ def parse_step(line: str) -> dict | None:
                 "type": "step", "id": "retry", "kind": "retry",
                 "label": "Waiting on the model", "detail": detail, "status": "running",
             }
-        head = body.split("·")[0].strip()
-        return {
-            "type": "step", "kind": "status",
-            "label": shorten(head, 64), "status": "running",
-        }
+        return None
     m = BRACKET_TOOL.match(line)
     if m:
         raw = m.group(1).lower()
         rest = m.group(2).strip()
         kind, verb = TOOL_KIND.get(raw, ("tool", raw.replace("_", " ")))
-        path = rest if rest and (("/" in rest) or ("." in rest)) else ""
+        path = step_path(rest)
         label = f"{verb} {shorten(Path(rest).name if path else rest, 48)}".strip() if rest else verb
         return {
             "type": "step", "kind": kind, "label": label,
             "detail": rest, "path": path, "status": "running",
         }
-    if len(line) > 180:
-        line = line[-120:]
-    return {"type": "step", "kind": "status", "label": shorten(line, 64), "status": "running"}
-
+    line = LEAD_GLYPH.sub("", line).strip()
+    if not line:
+        return None
+    for rx, kind, verb in PROGRESS:
+        pm = rx.match(line)
+        if not pm:
+            continue
+        rest = (pm.group(2) or "").strip()
+        path = step_path(rest)
+        gerund = pm.group(1).lower().endswith("ing")
+        label = f"{verb} {shorten(Path(path).name if path and path != '.' else rest, 48)}".strip() if rest else verb
+        return {
+            "type": "step", "kind": kind, "label": label,
+            "detail": rest, "path": path,
+            "status": "running" if gerund else "ok",
+        }
+    return None
 
 def tool_step(tcall) -> dict:
     if not isinstance(tcall, dict):

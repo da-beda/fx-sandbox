@@ -164,10 +164,30 @@ class Steps(unittest.TestCase):
         self.assertEqual(s["path"], "web/app.js")
 
     def test_recovered(self):
-        s = server.parse_step("[notice] recovered on attempt 3")
-        self.assertEqual(s["label"], "Model recovered")
-        self.assertEqual(s["kind"], "ok")
+        self.assertIsNone(server.parse_step("[notice] recovered on attempt 3"))
 
+    def test_progress_reading(self):
+        s = server.parse_step("● Reading README.md")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "README.md")
+        self.assertEqual(s["status"], "running")
+
+    def test_progress_listing(self):
+        s = server.parse_step("Listing web")
+        self.assertEqual(s["kind"], "list")
+        self.assertEqual(s["path"], "web")
+        self.assertEqual(s["status"], "running")
+
+    def test_progress_pathless_dropped_into_kind(self):
+        s = server.parse_step("● Reading")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "")
+        self.assertEqual(s["status"], "running")
+
+    def test_noise_dropped(self):
+        self.assertIsNone(server.parse_step("Hi! What can I help you with?"))
+        self.assertIsNone(server.parse_step('{"type":"assistant"}'))
+        self.assertIsNone(server.parse_step("[notice] something else"))
 
 class ReleaseCopy(unittest.TestCase):
     def test_no_demo_in_ui_copy(self):

@@ -37,24 +37,26 @@
     more: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>',
   };
   const STEP_ICO = {
-    read: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M8.4 2.5h6.3L19.5 7.3v3.2h-2V8.6h-4.4V4.5H8.4c-.8 0-1.4.6-1.4 1.4v12.2c0 .8.6 1.4 1.4 1.4H11v2H8.4A3.4 3.4 0 0 1 5 16.1V5.9A3.4 3.4 0 0 1 8.4 2.5z"/><path fill-rule="evenodd" d="M16.4 12.2a3.6 3.6 0 1 1-2.5 6.1l-1.8 1.8 1.4 1.4 1.8-1.8a3.6 3.6 0 0 1 1.1-7.5zm0 2a1.6 1.6 0 1 0 .1 3.2 1.6 1.6 0 0 0-.1-3.2z"/></svg>',
-    write: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m5.2 16.3 9.6-9.6 2.5 2.5-9.6 9.6H5.2v-2.5zm11.3-11.3 1.3-1.3a1.4 1.4 0 0 1 2 2l-1.3 1.3-2-2z"/></svg>',
-    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.75 2.5a8.25 8.25 0 0 1 6.5 13.3l3.8 3.8-1.8 1.8-3.8-3.8A8.25 8.25 0 1 1 10.75 2.5zm0 2.5a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5z"/></svg>',
-    run: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M7.4 3.5h9.2A3.4 3.4 0 0 1 20 6.9v10.2a3.4 3.4 0 0 1-3.4 3.4H7.4A3.4 3.4 0 0 1 4 17.1V6.9A3.4 3.4 0 0 1 7.4 3.5zM6.2 6.9c0-.7.5-1.2 1.2-1.2h9.2c.7 0 1.2.5 1.2 1.2v10.2c0 .7-.5 1.2-1.2 1.2H7.4c-.7 0-1.2-.5-1.2-1.2V6.9z"/><path d="M8.2 8.1 11.7 12 8.2 15.9 6.8 14.6 9.1 12 6.8 9.4 8.2 8.1zM13 13.2h4.2v-2H13v2z"/></svg>',
-    web: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zm0 2.1c-1.7 1.9-2.7 4.1-2.8 6.4h5.6c-.1-2.3-1.1-4.5-2.8-6.4zM7.1 11c.2-2.5 1.3-4.8 3-6.6A7.4 7.4 0 0 0 5.2 11H7.1zm9.8 0h1.9A7.4 7.4 0 0 0 13.9 4.4c1.7 1.8 2.8 4.1 3 6.6zM5.2 13a7.4 7.4 0 0 0 4.9 6.6c-1.7-1.8-2.8-4.1-3-6.6H5.2zm3.9 0c.1 2.3 1.1 4.5 2.9 6.4 1.7-1.9 2.7-4.1 2.8-6.4H9.1zm6.8 0c-.2 2.5-1.3 4.8-3 6.6A7.4 7.4 0 0 0 18.8 13h-1.9z"/></svg>',
-    retry: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2a8.8 8.8 0 1 1-8.2 5.7l1.9.6A6.8 6.8 0 1 0 12 5.2V8L16 4l-4-4v3.2z"/></svg>',
-    list: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 4.2 11 6.4h6.6A2.4 2.4 0 0 1 20 8.8v8.8A2.4 2.4 0 0 1 17.6 20H6.4A2.4 2.4 0 0 1 4 17.6V6.6A2.4 2.4 0 0 1 6.4 4.2h2.8z"/></svg>',
-    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 3.5h5.6l.8 1.5h4.1v2H4.3v-2h4.1l.8-1.5zM6.2 8.2h11.6l-.9 11.2A2 2 0 0 1 14.9 21H9.1a2 2 0 0 1-2-1.6L6.2 8.2z"/></svg>',
-    ok: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.2-4-4 1.8-1.8 2.2 2.2 7.2-7.2 1.8 1.8-9 9z"/></svg>',
-    agent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8a9.2 9.2 0 1 1 0 18.4 9.2 9.2 0 0 1 0-18.4zm0 6.4a2.8 2.8 0 1 0 .1 5.6 2.8 2.8 0 0 0-.1-5.6z"/></svg>',
-    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7.6 3.5h8.8A3.1 3.1 0 0 1 19.5 6.6v10.8a3.1 3.1 0 0 1-3.1 3.1H7.6a3.1 3.1 0 0 1-3.1-3.1V6.6A3.1 3.1 0 0 1 7.6 3.5zM15 7.2a1.6 1.6 0 1 0 .1 3.2A1.6 1.6 0 0 0 15 7.2zM5.7 15.4 9.2 12l7.6 7.6c.3-.1.6-.2.8-.4L8 11.3 5.7 13.4v2z"/></svg>',
-    skill: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7.2 3.2a3.8 3.8 0 1 1 0 7.6 3.8 3.8 0 0 1 0-7.6zm9.4 1.4 2.3 4H14.3l2.3-4zM6.4 13.2h2.4a2.4 2.4 0 0 1 2.4 2.4v2.4A2.4 2.4 0 0 1 8.8 20.4H6.4A2.4 2.4 0 0 1 4 18V15.6a2.4 2.4 0 0 1 2.4-2.4zm10.4.1a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2z"/></svg>',
-    status: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8A5.4 5.4 0 0 1 17 9.6c0 1.9-1 3.4-2.4 4.4v1.7h-5.2v-1.7A5.4 5.4 0 0 1 12 2.8zM9.6 17.2h4.8v1.3H9.6V17.2zm.8 2.2h3.2V21H10.4v-1.6z"/></svg>',
-    tool: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m7.2 14.2 7.4-7.4 2.2 2.2-7.4 7.4H7.2v-2.2zm8.3-9.6 1.5-1.5a1.5 1.5 0 0 1 2.1 2.1l-1.5 1.5-2.1-2.1zM5 17.2h5.2V21H5v-3.8z"/></svg>',
-    chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 10 12 17.4 4.6 10 6 8.6l6 6 6-6 1.4 1.4z"/></svg>',
+    read: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h6.2L18.5 8.8v2.4"/><path d="M13.2 3.5v5.3h5.3"/><path d="M6.8 3.5H6.6A2.1 2.1 0 0 0 4.5 5.6v12.8A2.1 2.1 0 0 0 6.6 20.5H11"/><circle cx="16.2" cy="16.3" r="3.3"/><path d="m18.6 18.7 2.5 2.5"/></svg>',
+    write: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 16.4 16.2 5l2.8 2.8L7.6 19.2H4.8v-2.8z"/><path d="m14.4 6.8 2.8 2.8"/></svg>',
+    search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.4"/><path d="m16 16 4.3 4.3"/></svg>',
+    explore: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.4"/><path d="m16 16 4.3 4.3"/></svg>',
+    run: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><path d="M8 9.2 11.4 12 8 14.8"/><path d="M13.2 14.8H17"/></svg>',
+    web: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.4 2.6 3.6 5.4 3.6 8.2s-1.2 5.6-3.6 8.2C9.6 17.6 8.4 14.8 8.4 12S9.6 6.4 12 3.8z"/></svg>',
+    retry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.2-5.5"/><path d="M20 4.8v5.2h-5.2"/></svg>',
+    list: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7.2A1.8 1.8 0 0 1 6.3 5.4h3.2l1.7 2h8.3A1.8 1.8 0 0 1 21.3 9.2v8.6a1.8 1.8 0 0 1-1.8 1.8H6.3A1.8 1.8 0 0 1 4.5 17.8V7.2z"/></svg>',
+    delete: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15"/><path d="M9.2 4.5h5.6l.8 2.5H8.4l.8-2.5z"/><path d="M6.4 7l.8 12.2A1.6 1.6 0 0 0 8.8 20.5h6.4a1.6 1.6 0 0 0 1.6-1.3L17.6 7"/></svg>',
+    ok: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"/></svg>',
+    agent: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="10" r="2.4"/><path d="M7.4 17.2a5 5 0 0 1 9.2 0"/></svg>',
+    image: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.4"/><path d="m6 16.5 3.4-3.6 2.8 2.8 2.2-2 3.6 2.8"/></svg>',
+    skill: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8.2 4.5h3.4l1.2 2.2h6.5A1.6 1.6 0 0 1 20.9 8.3v9.6a1.6 1.6 0 0 1-1.6 1.6H4.7A1.6 1.6 0 0 1 3.1 17.9V6.1A1.6 1.6 0 0 1 4.7 4.5h3.5z"/><path d="M8 12.2h8M8 15.4h5"/></svg>',
+    status: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18.5h6"/><path d="M10 21h4"/><path d="M12 3.5a5.4 5.4 0 0 1 5.4 5.4c0 2.2-1.1 3.7-2.6 4.8v1.8H9.2v-1.8A5.4 5.4 0 0 1 12 3.5z"/></svg>',
+    tool: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m8 15.2 7.2-7.2 2.2 2.2-7.2 7.2H8v-2.2z"/><path d="m16.4 6.8 1.4-1.4a1.4 1.4 0 0 1 2 2L18.4 8.8"/></svg>',
+    chev: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
   };
   const LIVE_DOTS = '<span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
   const GROUPABLE = new Set(["read", "write", "search", "web", "list", "delete", "tool", "image", "skill"]);
+  const EXPLORE = new Set(["read", "search"]);
   const IMG_EXT = /\.(png|jpe?g|webp|gif)$/i;
   const MD_EXT = /\.(md|markdown|mdown|mdx)$/i;
 
@@ -1040,6 +1042,7 @@
       path: step.path || "",
       detail: step.detail || "",
       kind: step.kind || "status",
+      status: step.status || "ok",
     };
   }
 
@@ -1049,24 +1052,131 @@
       return parts[parts.length - 1] || it.path;
     }
     return clip(String(it.detail || it.label || "").replace(
-      /^(Ran command|Running command|Ran|Read|Reading|Edited|Explored|Loaded|Viewed)\s+/i, ""), 56);
+      /^(Ran command|Running command|Ran|Read|Reading|Edited|Explored|Loaded|Viewed|Listed|Listing)\s+/i, ""), 56);
+  }
+
+  function normPath(p) {
+    return String(p || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+  }
+
+  function samePath(a, b) {
+    a = normPath(a);
+    b = normPath(b);
+    if (!a || !b) return false;
+    return a === b || a.endsWith("/" + b) || b.endsWith("/" + a);
+  }
+
+  function itemKey(it) {
+    const ident = normPath(it.path || it.detail || "");
+    if (!ident) return "";
+    return (it.kind || "") + ":" + ident;
   }
 
   function counted(verb, n, one, many) {
     return verb + ' <span class="num">' + n + "</span> " + (n === 1 ? one : many);
   }
 
+  function countBit(n, one, many) {
+    return '<span class="num">' + n + "</span> " + (n === 1 ? one : many);
+  }
+
+  function batchKind(items) {
+    const hasFile = items.some((it) => it.kind === "read");
+    const hasSearch = items.some((it) => it.kind === "search");
+    if (hasFile && hasSearch) return "explore";
+    if (hasSearch && !hasFile) return "search";
+    if (items.length && items.every((it) => it.kind === "list")) return "list";
+    if (hasFile) return "read";
+    return (items[0] && items[0].kind) || "status";
+  }
+
+  function groupStatus(items, incoming) {
+    if (incoming && incoming.status === "running") return "running";
+    if (items.some((it) => it.status === "running")) return "running";
+    return "ok";
+  }
+
+  function canMerge(row, step) {
+    if (!row || row.classList.contains("live")) return false;
+    const k = step.kind || "";
+    const rk = row.dataset.kind;
+    if (!k || k === "run" || rk === "run") return false;
+    if (k === "retry" || rk === "retry") return false;
+    if ((EXPLORE.has(k) || k === "explore") && (EXPLORE.has(rk) || rk === "explore")) return true;
+    return rk === k && GROUPABLE.has(k);
+  }
+
+  const PROGRESS_RE = [
+    [/^(reading|read)\b\s*(.*)$/i, "read"],
+    [/^(listing|listed|list)\b\s*(.*)$/i, "list"],
+    [/^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$/i, "write"],
+    [/^(running|ran|executing)\b(?:\s+command)?\s*(.*)$/i, "run"],
+    [/^(searching|searched|search|grepping|grep)\b\s*(.*)$/i, "search"],
+    [/^(loading|loaded)\s+(?:skill\s+)?(.*)$/i, "skill"],
+    [/^(viewing|viewed)\b\s*(.*)$/i, "image"],
+  ];
+
+  function stripGlyphs(s) {
+    return String(s || "").replace(/^[\s\-|*·•●○◉◎◐◑◒◓✓✔▸►▶▷⬤⏺⚫⚪∙⋅⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+/u, "").trim();
+  }
+
+  function looksPath(s) {
+    s = String(s || "").trim().replace(/^["']|["']$/g, "");
+    if (!s) return "";
+    if (s === "." || s === "./") return ".";
+    if (/\s/.test(s) && s.indexOf("/") < 0) return "";
+    if (/[\/.\\]/.test(s) || /^[\w.@-]+$/.test(s)) return s;
+    return "";
+  }
+
+  function normalizeStep(step) {
+    if (!step) return null;
+    let kind = step.kind || "";
+    let label = stripGlyphs(step.label || "");
+    let detail = step.detail || "";
+    let path = step.path || "";
+    let status = step.status || "";
+    if ((kind === "ok" || kind === "status") && /recovered/i.test(label)) return null;
+    if (kind === "status" || kind === "tool" || !kind) {
+      const raw = stripGlyphs(label || detail);
+      for (const [re, k] of PROGRESS_RE) {
+        const m = raw.match(re);
+        if (!m) continue;
+        kind = k;
+        const rest = (m[2] || "").trim();
+        if (!path) path = looksPath(rest);
+        if (!detail) detail = rest;
+        if (!status) status = /ing$/i.test(m[1]) ? "running" : "ok";
+        break;
+      }
+    }
+    if (!kind || kind === "status") return null;
+    if (!label && !path && !detail && kind !== "retry") return null;
+    return Object.assign({}, step, { kind, label, detail, path, status: status || step.status || "ok" });
+  }
+
   function formatLab(step, n, items) {
     const kind = step.kind || "status";
+    const status = step.status || "";
     const first = (items && items[0]) || {};
     const snippet = clip(first.detail || step.detail || "", 48);
     if (kind === "run") {
       const cmd = snippet.replace(/^(Ran command|Running command|Ran)\s+/i, "");
-      return { verb: "Ran command", det: cmd, aria: "Ran command" + (cmd ? " " + cmd : "") };
+      const verb = status === "running" ? "Running command" : "Ran command";
+      return { verb, det: cmd, aria: verb + (cmd ? " " + cmd : "") };
+    }
+    if (kind === "explore") {
+      const files = (items || []).filter((it) => it.kind === "read").length;
+      const searches = (items || []).filter((it) => it.kind === "search").length;
+      const bits = [];
+      const raw = [];
+      if (files) { bits.push(countBit(files, "file", "files")); raw.push(files + (files === 1 ? " file" : " files")); }
+      if (searches) { bits.push(countBit(searches, "search", "searches")); raw.push(searches + (searches === 1 ? " search" : " searches")); }
+      return { verb: "Explored", detHtml: bits.join(", "), aria: "Explored " + raw.join(", ") };
     }
     if (kind === "read") return { verb: counted("Read", n, "file", "files"), aria: "Read " + n + (n === 1 ? " file" : " files") };
     if (kind === "write") return { verb: counted("Edited", n, "file", "files"), aria: "Edited " + n + (n === 1 ? " file" : " files") };
-    if (kind === "search") return { verb: "Explored", det: n + (n === 1 ? " search" : " searches"), aria: "Explored " + n + (n === 1 ? " search" : " searches") };
+    if (kind === "search") return { verb: counted("Ran", n, "search", "searches"), aria: "Ran " + n + (n === 1 ? " search" : " searches") };
     if (kind === "web") return { verb: counted("Fetched", n, "page", "pages"), aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
     if (kind === "list") return { verb: counted("Listed", n, "folder", "folders"), aria: "Listed " + n + (n === 1 ? " folder" : " folders") };
     if (kind === "delete") return { verb: counted("Deleted", n, "file", "files"), aria: "Deleted " + n + (n === 1 ? " file" : " files") };
@@ -1079,9 +1189,10 @@
   }
 
   function paintStep(el, step, items) {
-    items = items || stepItems(el);
+    items = (items || stepItems(el)).filter((it) => it.path || it.detail || it.label);
     if (!items.length) items = [itemFrom(step)];
-    const kind = step.kind || el.dataset.kind || "status";
+    let kind = step.kind || el.dataset.kind || "status";
+    if (items.some((it) => it.kind === "read" || it.kind === "search")) kind = batchKind(items);
     const status = step.status != null ? step.status : (el.dataset.status || "");
     const n = items.length;
     const open = el.classList.contains("open");
@@ -1103,6 +1214,7 @@
     const lab = formatLab({ kind, status, label: step.label, detail: step.detail, path: step.path }, n, items);
     const kids = items.map((it) => {
       const cap = esc(itemCaption(it));
+      if (!cap) return "";
       if (it.path) {
         return '<button type="button" class="kid" data-path="' + esc(it.path) + '">' + cap + "</button>";
       }
@@ -1120,7 +1232,8 @@
       '<button type="button" class="hit" aria-expanded="' + exp + '">' +
         '<span class="lab">' +
           '<span class="verb' + shimmer + '">' + lab.verb + "</span>" +
-          (lab.det ? '<span class="det">' + esc(lab.det) + "</span>" : "") +
+          (lab.detHtml ? '<span class="det">' + lab.detHtml + "</span>" :
+            (lab.det ? '<span class="det">' + esc(lab.det) + "</span>" : "")) +
         "</span>" +
       "</button>" +
       '<div class="kids">' + kids + "</div>";
@@ -1147,51 +1260,70 @@
     function place(el) {
       trail.insertBefore(el, live);
     }
+    function apply(row, step, items) {
+      paintStep(row, { kind: batchKind(items), status: groupStatus(items, step), label: step.label, detail: step.detail, path: step.path, id: step.id }, items);
+    }
     return {
       el: trail,
-      push(step) {
+      push(raw) {
+        const step = normalizeStep(raw);
         if (!step) return;
-        if (!step.label && !step.kind) return;
+        const item = itemFrom(step);
+        const empty = !item.path && !item.detail;
         if (step.id) {
           const existing = trail.querySelector('.step[data-id="' + CSS.escape(String(step.id)) + '"]');
           if (existing) {
-            paintStep(existing, step, [itemFrom(step)]);
+            const items = empty ? stepItems(existing) : [item];
+            apply(existing, step, items);
             return;
           }
         }
-        if (step.status === "ok" && GROUPABLE.has(step.kind || "")) {
-          const running = [...trail.querySelectorAll(":scope > .step.running:not(.live)")].reverse()
-            .find((r) => r.dataset.kind === step.kind &&
-              (!step.path || r.dataset.path === step.path ||
-                stepItems(r).some((it) => it.path === step.path)));
-          if (running) {
-            const prev = running.previousElementSibling;
-            if (prev && prev.classList.contains("step") && !prev.classList.contains("live")
-                && prev.dataset.kind === step.kind && prev.dataset.status === "ok") {
-              const items = stepItems(prev);
-              items.push(itemFrom(step));
-              paintStep(prev, { kind: step.kind, status: "ok" }, items);
-              running.remove();
-              return;
-            }
-            paintStep(running, step, [itemFrom(step)]);
+        const rows = solids();
+        const last = rows[rows.length - 1];
+        const key = itemKey(item);
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const items = stepItems(rows[i]);
+          const ix = items.findIndex((it) => {
+            if (key && itemKey(it) === key) return true;
+            if (item.path && (samePath(it.path, item.path) || samePath(it.detail, item.path))) return true;
+            if (item.detail && (samePath(it.path, item.detail) || it.detail === item.detail)) return true;
+            return false;
+          });
+          if (ix < 0) continue;
+          items[ix] = Object.assign({}, items[ix], item, {
+            path: items[ix].path || item.path,
+            detail: items[ix].detail || item.detail,
+          });
+          apply(rows[i], step, items);
+          return;
+        }
+        if (empty) {
+          const same = last && last.dataset.kind === step.kind ? last
+            : [...rows].reverse().find((r) => r.dataset.kind === step.kind);
+          if (same) {
+            apply(same, step, stepItems(same));
             return;
           }
-          const last = solids().filter((r) => !r.classList.contains("running")).pop();
-          if (last && last.dataset.kind === step.kind && last.dataset.status === "ok") {
-            const items = stepItems(last);
-            items.push(itemFrom(step));
-            paintStep(last, step, items);
-            return;
-          }
+          if (step.status === "running") return;
+        }
+        if (last && canMerge(last, step)) {
+          const items = stepItems(last);
+          items.push(item);
+          apply(last, step, items);
+          return;
         }
         const row = document.createElement("div");
-        paintStep(row, step);
+        paintStep(row, step, empty ? [] : [item]);
         place(row);
       },
       stop(ok) {
         clearInterval(iv);
         const spent = fmtElapsed(Date.now() - t0);
+        solids().forEach((el) => {
+          if (!el.classList.contains("running")) return;
+          const items = stepItems(el).map((it) => Object.assign({}, it, { status: "ok" }));
+          paintStep(el, { kind: el.dataset.kind, status: "ok" }, items);
+        });
         if (ok === false) {
           live.className = "step live warn";
           live.innerHTML = '<div class="spine"><span class="ico-face kind" aria-hidden="true">' +
@@ -2116,8 +2248,6 @@
             bot.innerHTML = render(acc);
           } else if (ev.type === "step") {
             trail.push(ev);
-          } else if (ev.type === "activity" && ev.text) {
-            trail.push({ kind: "status", label: String(ev.text).slice(-80), status: "running" });
           } else if (ev.type === "tools" && ev.tools) {
             ev.tools.forEach((t) => trail.push({
               kind: "tool",
