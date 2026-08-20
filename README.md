@@ -106,7 +106,9 @@ fxs ui
 
 Opens a local page. No npm. Python 3 stdlib.
 
-The page is the chat. Settings (folder, model, ask/auto/yolo, theme, sessions) sit behind the gear. Type `/` for commands, `@` for files. `⌘N` new chat, `⌘,` settings.
+Chat in the middle. A collapsible **Files** sidebar on the right is the workspace the agent sees — click a file to edit it in that same pane, chevron to go back to the tree.
+
+`⌘B` files, `⌘S` save, `⌘P` filter, `⌘N` new chat, `⌘,` settings. Type `/` for commands, `@` for files (⇧Enter opens). Tool chips and `@path` in replies open the editor.
 
 `--bind-all` / `--port` if you need them. `--offline` when Docker is not up.
 

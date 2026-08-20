@@ -38,6 +38,9 @@ SKIP_DIRS = {
     ".git", "node_modules", ".venv", "dist", "target", "__pycache__",
     ".fx", ".next", "vendor",
 }
+MAX_TREE = 800
+MAX_TEXT = 1_000_000
+MAX_IMAGE = 4_000_000
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 SAFE_FX = {
     "models", "usage", "credits", "balance", "permissions", "status",
@@ -207,6 +210,114 @@ def list_files(ws: str, query: str) -> list[str]:
     return [p for _, p in scored[:40]]
 
 
+def resolve_in_ws(ws: str, rel: str) -> Path:
+    rel = (rel or "").replace("\\", "/").strip()
+    if rel.startswith("/"):
+        rel = rel.lstrip("/")
+    if not rel or rel in (".", "..") or ".." in Path(rel).parts:
+        raise ValueError("bad path")
+    root = Path(ws).resolve()
+    target = (root / rel).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError("outside workspace")
+    return target
+
+
+def list_tree(ws: str) -> dict:
+    root = Path(ws)
+    count = 0
+    truncated = False
+
+    def walk(dirpath: Path, rel: str) -> list:
+        nonlocal count, truncated
+        items: list[dict] = []
+        try:
+            entries = sorted(
+                dirpath.iterdir(),
+                key=lambda p: (not p.is_dir(), p.name.lower()),
+            )
+        except OSError:
+            return items
+        for p in entries:
+            if truncated:
+                break
+            name = p.name
+            if name.startswith(".") or name in SKIP_DIRS:
+                continue
+            count += 1
+            if count > MAX_TREE:
+                truncated = True
+                break
+            child = name if not rel else f"{rel}/{name}"
+            if p.is_dir() and not p.is_symlink():
+                items.append({
+                    "name": name,
+                    "path": child,
+                    "type": "dir",
+                    "children": walk(p, child),
+                })
+            elif p.is_file():
+                try:
+                    size = int(p.stat().st_size)
+                except OSError:
+                    size = 0
+                items.append({
+                    "name": name,
+                    "path": child,
+                    "type": "file",
+                    "size": size,
+                })
+        return items
+
+    return {"tree": walk(root, ""), "truncated": truncated, "count": count}
+
+
+def read_workspace_file(ws: str, rel: str) -> dict:
+    p = resolve_in_ws(ws, rel)
+    if not p.is_file():
+        raise ValueError("not a file")
+    ext = p.suffix.lower()
+    try:
+        size = int(p.stat().st_size)
+    except OSError:
+        size = 0
+    if ext in IMAGE_EXT:
+        if size > MAX_IMAGE:
+            return {"kind": "binary", "path": rel, "size": size, "name": p.name}
+        import base64
+        mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }[ext]
+        src = "data:" + mime + ";base64," + base64.b64encode(p.read_bytes()).decode("ascii")
+        return {"kind": "image", "path": rel, "size": size, "name": p.name, "src": src}
+    if size > MAX_TEXT:
+        return {"kind": "binary", "path": rel, "size": size, "name": p.name}
+    raw = p.read_bytes()
+    if b"\0" in raw[:8192]:
+        return {"kind": "binary", "path": rel, "size": size, "name": p.name}
+    return {
+        "kind": "text",
+        "path": rel,
+        "size": size,
+        "name": p.name,
+        "text": raw.decode("utf-8", errors="replace"),
+    }
+
+
+def write_workspace_file(ws: str, rel: str, text: str) -> dict:
+    p = resolve_in_ws(ws, rel)
+    if p.exists() and not p.is_file():
+        raise ValueError("not a file")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = text if isinstance(text, str) else ""
+    p.write_text(data, encoding="utf-8")
+    return {"ok": True, "path": rel, "size": int(p.stat().st_size), "name": p.name}
+
+
 def extract_json(text: str):
     text = (text or "").strip()
     if not text:
@@ -329,6 +440,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {
                 "live": not local_mode(),
                 "workspace": ws,
+                "default_workspace": default_workspace(),
                 "model": MODEL,
                 "key": has_key(),
                 "docker": docker_state(),
@@ -356,6 +468,24 @@ class Handler(BaseHTTPRequestHandler):
                 return
             q = (qs.get("q") or [""])[0]
             self._json(200, {"files": list_files(ws, q)})
+            return
+        if u.path == "/api/tree":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e), "tree": []})
+                return
+            self._json(200, list_tree(ws))
+            return
+        if u.path == "/api/file":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+                rel = (qs.get("path") or [""])[0]
+                self._json(200, read_workspace_file(ws, rel))
+            except (ValueError, OSError) as e:
+                self._json(400, {"error": str(e)})
             return
         self._static(u.path)
 
@@ -401,6 +531,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/model":
             self._set_model(payload)
+            return
+        if u.path == "/api/file":
+            try:
+                ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
+                rel = str(payload.get("path") or "")
+                self._json(200, write_workspace_file(ws, rel, str(payload.get("text") or "")))
+            except (ValueError, OSError) as e:
+                self._json(400, {"error": str(e)})
             return
         self._json(404, {"error": "not found"})
 
@@ -513,7 +651,7 @@ class Handler(BaseHTTPRequestHandler):
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
         if files:
-            emit({"type": "tools", "tools": [{"name": "read"}]})
+            emit({"type": "tools", "tools": [{"name": "read " + files[0]}]})
             time.sleep(0.1)
         readme = Path(ws) / "README.md"
         excerpt = ""
