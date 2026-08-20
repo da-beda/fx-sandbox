@@ -1436,6 +1436,7 @@
     state.api = p.api && p.api !== "vercel" ? p.api : "auto";
     paintApi(p);
     paintKeyRow(p, s.key);
+    paintPplxRow(p);
     const urlRow = $("provider-url-row");
     if (urlRow) {
       urlRow.hidden = !p.url || p.id !== "custom";
@@ -1995,6 +1996,33 @@
     }
   }
 
+  function paintPplxRow(p) {
+    const hint = $("pplx-hint");
+    if (!hint) return;
+    hint.textContent = (p && p.perplexity)
+      ? "Search key is saved. Paste a new one to replace."
+      : "Perplexity Search API key. The agent uses it for web search. Kept on this machine.";
+  }
+
+  async function savePplxKey(key) {
+    key = String(key || "").trim();
+    if (!key) return null;
+    const r = await fetch("/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, kind: "perplexity" }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const inp = $("pplx-input");
+    if (inp) inp.value = "";
+    if (data.warn) addMsg("sys", data.warn);
+    paintPplxRow(data);
+    paintHome();
+    await refreshStatus();
+    return data;
+  }
+
   async function saveKey(key) {
     key = String(key || "").trim();
     if (!key) return null;
@@ -2020,6 +2048,7 @@
       if (data.providers) paintProviders(data.providers);
       paintApi(data);
       paintKeyRow(data, data.key);
+      paintPplxRow(data);
     }
     paintHome();
     await loadModels();
@@ -2051,6 +2080,7 @@
     }
     paintApi(data);
     paintKeyRow(data, data.key);
+    paintPplxRow(data);
     const inp = $("key-input");
     if (data.needs_key && inp) {
       const keyRow = $("key-row");
@@ -2754,6 +2784,29 @@
     keySave.addEventListener("click", async () => {
       try {
         await saveKey(pendingKey());
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const pplxInput = $("pplx-input");
+  if (pplxInput) {
+    pplxInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      try {
+        await savePplxKey(pplxInput.value);
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const pplxSave = $("pplx-save");
+  if (pplxSave) {
+    pplxSave.addEventListener("click", async () => {
+      const v = pplxInput ? pplxInput.value : "";
+      try {
+        await savePplxKey(v);
       } catch (err) {
         addMsg("sys", String(err.message || err));
       }

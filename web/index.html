@@ -9,7 +9,7 @@
   <title>fxs</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/favicon.svg">
-  <link rel="stylesheet" href="/app.css?v=trail7">
+  <link rel="stylesheet" href="/app.css?v=trail9">
 </head>
 <body class="welcome">
   <button type="button" id="sessions-btn" class="icon corner-btn" data-tip="Sessions" aria-label="Sessions" aria-expanded="false" aria-controls="rail">
@@ -303,6 +303,17 @@
                   </div>
                   <p class="set-hint" id="key-hint">Save, Enter, or switch protocol. Kept on this machine, not in the project.</p>
                 </div>
+                <div class="set-stack" id="pplx-row">
+                  <span class="set-k">Web search</span>
+                  <div class="key-save-row">
+                    <label class="set-field">
+                      <span class="vh">Perplexity API key</span>
+                      <input id="pplx-input" type="password" spellcheck="false" autocomplete="off" placeholder="pplx-…">
+                    </label>
+                    <button type="button" class="text-btn" id="pplx-save">Save</button>
+                  </div>
+                  <p class="set-hint" id="pplx-hint">Perplexity Search API key. The agent uses it for web search. Kept on this machine.</p>
+                </div>
                 <div class="set-stack" id="provider-url-row" hidden>
                   <span class="set-k">Custom URL</span>
                   <label class="set-field">
@@ -380,6 +391,6 @@
     <button type="button" data-act="delete">Delete</button>
   </div>
 
-  <script src="/app.js?v=trail7"></script>
+  <script src="/app.js?v=trail9"></script>
 </body>
 </html>

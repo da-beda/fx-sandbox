@@ -189,6 +189,8 @@ def provider_from_key(key: str) -> str:
         return "openrouter"
     if k.startswith("xai-"):
         return "xai"
+    if k.startswith("pplx-"):
+        return "perplexity"
     return ""
 
 
@@ -424,6 +426,7 @@ def current_provider() -> dict[str, Any]:
         "api": "vercel" if not up else configured_api(),
         "effective_api": "vercel" if not up else effective_api(pid),
         "providers": PROVIDERS,
+        "perplexity": bool((os.environ.get("PERPLEXITY_API_KEY") or "").strip()),
     }
 
 
@@ -508,11 +511,13 @@ def chat_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
         params = tool.get("inputSchema")
         if not params:
             params = {"type": "object", "properties": {}}
+        if name in SEARCH_TOOL_NAMES:
+            params = ensure_search_schema(params)
         tools.append({
             "type": "function",
             "function": {
                 "name": name,
-                "description": tool.get("description") or "",
+                "description": tool.get("description") or search_tool_description(name),
                 "parameters": params,
             },
         })
@@ -798,13 +803,8 @@ def unified_finish(reason: str) -> str:
     }.get(reason, "other")
 
 
-# Models often emit generic names (web_search, bash). fx 0.0.4's catalog
-# lists Vercel provider tools like perplexity_search that this translator
-# cannot execute — unknown/provider names become MalformedProviderResultIdentity.
+# Shell names models often emit; fx 0.0.4's catalog uses `terminal`.
 TOOL_NAME_ALIASES = {
-    "web_search": "web_fetch",
-    "search_web": "web_fetch",
-    "perplexity_search": "web_fetch",
     "bash": "terminal",
     "shell": "terminal",
     "run_command": "terminal",
@@ -819,7 +819,37 @@ TOOL_NAME_ALIASES = {
     "list": "list_files",
     "fetch": "web_fetch",
 }
-PROVIDER_SEARCH_TOOLS = {"web_search", "search_web", "perplexity_search", "search"}
+SEARCH_TOOL_NAMES = {"perplexity_search", "web_search", "search_web"}
+
+
+def search_tool_description(name: str) -> str:
+    if name in SEARCH_TOOL_NAMES:
+        return "Search the public web. Pass {\"query\": \"...\"}."
+    return ""
+
+
+def ensure_search_schema(params: Any) -> dict[str, Any]:
+    if not isinstance(params, dict):
+        params = {"type": "object", "properties": {}}
+    else:
+        params = dict(params)
+    props = params.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+    else:
+        props = dict(props)
+    if "query" not in props:
+        props["query"] = {
+            "type": "string",
+            "description": "Search query. Required. At least two characters.",
+        }
+        req = [r for r in (params.get("required") or []) if r]
+        if "query" not in req:
+            params["required"] = req + ["query"]
+    params["properties"] = props
+    if not params.get("type"):
+        params["type"] = "object"
+    return params
 
 
 def canonical_tool_name(name: str, allowed: Optional[list[str]] = None) -> str:
@@ -827,8 +857,14 @@ def canonical_tool_name(name: str, allowed: Optional[list[str]] = None) -> str:
     if not raw:
         return raw
     allow = {a for a in (allowed or []) if a}
-    if raw in PROVIDER_SEARCH_TOOLS and (not allow or "web_fetch" in allow):
-        return "web_fetch"
+    if raw in SEARCH_TOOL_NAMES:
+        if "perplexity_search" in allow:
+            return "perplexity_search"
+        if raw in allow:
+            return raw
+        if "web_search" in allow:
+            return "web_search"
+        return "perplexity_search"
     if raw in allow:
         return raw
     alias = TOOL_NAME_ALIASES.get(raw) or TOOL_NAME_ALIASES.get(raw.lower())
@@ -837,24 +873,70 @@ def canonical_tool_name(name: str, allowed: Optional[list[str]] = None) -> str:
     return raw
 
 
-def coerce_tool_input(name: str, parsed: Any, allowed: Optional[list[str]] = None) -> tuple[str, Any]:
-    """Map search-style args onto web_fetch.url when we rewrote the tool."""
-    name = canonical_tool_name(name, allowed)
-    if not isinstance(parsed, dict):
-        return name, parsed
-    if name != "web_fetch":
-        return name, parsed
-    if parsed.get("url"):
-        return name, parsed
-    q = str(parsed.get("query") or parsed.get("q") or parsed.get("search") or "").strip()
-    if not q:
-        return name, parsed
-    if q.startswith("http://") or q.startswith("https://"):
-        return name, {"url": q}
-    if " " not in q and "." in q and "/" not in q.split(".", 1)[0]:
-        return name, {"url": "https://" + q}
-    from urllib.parse import quote_plus
-    return name, {"url": "https://html.duckduckgo.com/html/?q=" + quote_plus(q)}
+def perplexity_api_key() -> str:
+    load_env_file()
+    return (os.environ.get("PERPLEXITY_API_KEY") or "").strip()
+
+
+def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
+    """POST https://api.perplexity.ai/search. Never raises."""
+    if not isinstance(inp, dict):
+        inp = {}
+    query = str(inp.get("query") or inp.get("q") or inp.get("search") or "").strip()
+    if not query:
+        for key, val in inp.items():
+            if key in ("maxResults", "max_results", "maxTokens", "max_tokens"):
+                continue
+            if isinstance(val, str) and len(val.strip()) >= 2:
+                query = val.strip()
+                break
+    if not query:
+        query = str(fallback_query or "").strip()
+    if not query:
+        return {"error": "search query is required"}
+    key = perplexity_api_key()
+    if not key:
+        return {
+            "error": "Web search needs a Perplexity API key. Add one in Settings → Provider → Web search.",
+        }
+    raw_n = inp.get("maxResults") or inp.get("max_results") or 5
+    try:
+        max_results = max(1, min(int(raw_n), 20))
+    except (TypeError, ValueError):
+        max_results = 5
+    body = json.dumps({"query": query, "max_results": max_results}).encode()
+    req = urllib.request.Request(
+        "https://api.perplexity.ai/search",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", "replace")[:300]
+        return {"error": f"Perplexity search failed (HTTP {e.code}). {err}"}
+    except Exception as e:
+        return {"error": f"Perplexity search failed. {e}"}
+    rows = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return {"error": "Perplexity returned no results"}
+    out = []
+    for row in rows[:max_results]:
+        if not isinstance(row, dict):
+            continue
+        out.append({
+            "title": row.get("title") or "",
+            "url": row.get("url") or "",
+            "snippet": str(row.get("snippet") or "")[:800],
+            "date": row.get("date") or row.get("last_updated") or "",
+        })
+    return {"query": query, "results": out}
 
 
 class Stream:
@@ -886,8 +968,8 @@ class Stream:
         content = delta.get("content") or ""
         if content:
             events.append(_j({"type": "text-delta", "delta": content}))
-        # OpenRouter stealth models stream `reasoning` before tool_calls. fx
-        # treats an open reasoning part as MalformedProviderResultIdentity
+        # OpenRouter stealth models stream `reasoning` before tool_calls.
+        # fx treats an open reasoning part as MalformedProviderResultIdentity
         # when a tool-input-start follows, so we do not forward it.
         calls = delta.get("tool_calls") or (choice.get("message") or {}).get("tool_calls") or []
         for call in calls:
@@ -899,14 +981,8 @@ class Stream:
                 acc["id"] = f"call_{idx}"
             fn = call.get("function") or {}
             if fn.get("name"):
-                raw_name = fn["name"]
-                acc["raw_name"] = raw_name
-                acc["name"] = canonical_tool_name(raw_name, self.allowed_tools)
-            rewrite = (acc.get("raw_name") or acc.get("name") or "") in PROVIDER_SEARCH_TOOLS or (
-                acc.get("name") == "web_fetch" and (acc.get("raw_name") or "") != "web_fetch"
-            )
-            acc["rewrite"] = bool(acc.get("rewrite") or rewrite)
-            if not acc["started"] and acc["id"] and acc["name"] and not acc.get("rewrite"):
+                acc["name"] = canonical_tool_name(fn["name"], self.allowed_tools)
+            if not acc["started"] and acc["id"] and acc["name"]:
                 acc["started"] = True
                 events.append(_j({
                     "type": "tool-input-start",
@@ -916,7 +992,7 @@ class Stream:
             args = fn.get("arguments") or ""
             if args:
                 acc["args"] += args
-                if acc["started"] and not acc.get("rewrite"):
+                if acc["started"]:
                     events.append(_j({
                         "type": "tool-input-delta",
                         "id": acc["id"],
@@ -940,6 +1016,32 @@ class Stream:
         self.finished = True
         return [err, _j({"type": "finish", "finishReason": {"unified": "error"}})]
 
+    def search_calls(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for idx in self.order:
+            acc = self.tools.get(idx)
+            if not acc or not acc.get("id"):
+                continue
+            name = acc.get("name") or ""
+            if name not in SEARCH_TOOL_NAMES:
+                continue
+            try:
+                parsed = json.loads(acc.get("args") or "{}")
+            except json.JSONDecodeError:
+                parsed = {}
+            if not isinstance(parsed, dict):
+                parsed = {}
+            out.append({"id": acc["id"], "name": name, "input": parsed})
+        return out
+
+    def has_client_tools(self) -> bool:
+        search_ids = {t["id"] for t in self.search_calls()}
+        for idx in self.order:
+            acc = self.tools.get(idx)
+            if acc and acc.get("id") and acc["id"] not in search_ids:
+                return True
+        return False
+
     def _finalize(self, reason: str, usage: dict) -> list[bytes]:
         if self.finished:
             return []
@@ -949,38 +1051,21 @@ class Stream:
             acc = self.tools.get(idx)
             if not acc or not acc.get("id"):
                 continue
+            if acc.get("started"):
+                events.append(_j({"type": "tool-input-end", "id": acc["id"]}))
             args = acc.get("args") or "{}"
             try:
                 parsed = json.loads(args)
                 if not isinstance(parsed, dict):
                     raise ValueError("not object")
+                events.append(_j({
+                    "type": "tool-call",
+                    "toolCallId": acc["id"],
+                    "toolName": acc.get("name") or "",
+                    "input": parsed,
+                }))
             except (json.JSONDecodeError, ValueError):
-                if acc.get("started"):
-                    events.append(_j({"type": "tool-input-end", "id": acc["id"]}))
                 events.append(_j({"type": "error", "error": "tool arguments are not valid JSON"}))
-                continue
-            name, parsed = coerce_tool_input(acc.get("name") or acc.get("raw_name") or "", parsed, self.allowed_tools)
-            acc["name"] = name
-            final_args = json.dumps(parsed, separators=(",", ":"))
-            if not acc.get("started"):
-                events.append(_j({
-                    "type": "tool-input-start",
-                    "id": acc["id"],
-                    "toolName": name,
-                }))
-                events.append(_j({
-                    "type": "tool-input-delta",
-                    "id": acc["id"],
-                    "delta": final_args,
-                }))
-                acc["started"] = True
-            events.append(_j({"type": "tool-input-end", "id": acc["id"]}))
-            events.append(_j({
-                "type": "tool-call",
-                "toolCallId": acc["id"],
-                "toolName": name,
-                "input": parsed,
-            }))
         finish: dict[str, Any] = {
             "type": "finish",
             "finishReason": {"unified": unified_finish(reason)},
@@ -1219,6 +1304,45 @@ def read_sse_data(resp) -> Iterable[str]:
 
 def _j(obj: Any) -> bytes:
     return json.dumps(obj, separators=(",", ":")).encode()
+
+
+def last_user_text(messages: list[dict]) -> str:
+    for msg in reversed(messages or []):
+        if (msg or {}).get("role") != "user":
+            continue
+        raw = msg.get("content")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        if isinstance(raw, list):
+            parts = [str(p.get("text") or "") for p in raw if isinstance(p, dict)]
+            text = "".join(parts).strip()
+            if text:
+                return text
+    return ""
+
+
+def mark_search_events(events: Iterable[bytes], search_ids: set[str]) -> list[bytes]:
+    """Drop provider-search events so fx never sees a Vercel-only tool identity."""
+    out: list[bytes] = []
+    for ev in events:
+        try:
+            obj = json.loads(ev)
+        except json.JSONDecodeError:
+            out.append(ev)
+            continue
+        t = obj.get("type") or ""
+        if t == "tool-input-start" and obj.get("toolName") in SEARCH_TOOL_NAMES:
+            continue
+        if t in ("tool-input-delta", "tool-input-end") and obj.get("id") in search_ids:
+            continue
+        if t == "tool-call" and (
+            obj.get("toolCallId") in search_ids or obj.get("toolName") in SEARCH_TOOL_NAMES
+        ):
+            continue
+        if t == "finish" and search_ids:
+            continue
+        out.append(ev)
+    return out
 
 
 def write_sse(event: bytes) -> bytes:
@@ -1482,19 +1606,93 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 return
             conv: Stream = ResponseStream(allowed) if used_responses else Stream(allowed)
             try:
-                for data in read_sse_data(resp):
-                    if data.strip() == "[DONE]":
-                        break
-                    self._write_events(conv.consume(data))
-                self._write_events(conv.close())
+                self._stream_with_search(up, chat_req, resp_req, resp, used_responses, allowed, conv)
             except Exception as e:
-                self._write_events(conv.fail(str(e)))
+                self._write_events(Stream(allowed).fail(str(e)))
             self.close_connection = True
         finally:
             try:
                 resp.close()
             except Exception:
                 pass
+
+    def _write_search_events(self, events: Iterable[bytes], conv: "Stream") -> None:
+        ids = {t["id"] for t in conv.search_calls()}
+        self._write_events(mark_search_events(events, ids))
+
+    def _stream_with_search(
+        self,
+        up: "Upstream",
+        chat_req: dict,
+        resp_req: dict,
+        resp: Any,
+        used_responses: bool,
+        allowed: list[str],
+        conv: "Stream",
+    ) -> None:
+        messages = list(chat_req.get("messages") or [])
+        first = True
+        for _round in range(6):
+            if not first:
+                chat_req = dict(chat_req)
+                chat_req["messages"] = messages
+                next_resp_req = responses_from_chat(chat_req) if up.use_responses() else {}
+                try:
+                    resp, used_responses = up.complete(chat_req, next_resp_req)
+                except Exception as e:
+                    self._write_events(Stream(allowed).fail(str(e)))
+                    return
+                code = getattr(resp, "status", None) or getattr(resp, "code", 200)
+                if code != 200:
+                    body = resp.read()
+                    msg = upstream_http_error(code, body)
+                    self._write_events(Stream(allowed).fail(msg))
+                    return
+                conv = ResponseStream(allowed) if used_responses else Stream(allowed)
+            first = False
+            try:
+                for data in read_sse_data(resp):
+                    if data.strip() == "[DONE]":
+                        break
+                    self._write_search_events(conv.consume(data), conv)
+                self._write_search_events(conv.close(), conv)
+            except Exception as e:
+                self._write_events(conv.fail(str(e)))
+                return
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+            searches = conv.search_calls()
+            if not searches:
+                return
+            fallback = last_user_text(messages)
+            assistant: dict[str, Any] = {"role": "assistant", "content": None, "tool_calls": []}
+            tool_msgs: list[dict[str, Any]] = []
+            for t in searches:
+                result = run_perplexity_search(t["input"], fallback_query=fallback)
+                assistant["tool_calls"].append({
+                    "id": t["id"],
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "arguments": json.dumps(t["input"], separators=(",", ":")),
+                    },
+                })
+                tool_msgs.append({
+                    "role": "tool",
+                    "tool_call_id": t["id"],
+                    "content": json.dumps(result, separators=(",", ":")),
+                })
+            if conv.has_client_tools():
+                self._write_events([_j({
+                    "type": "finish",
+                    "finishReason": {"unified": "tool-calls"},
+                })])
+                return
+            messages = messages + [assistant] + tool_msgs
+        self._write_events(Stream(allowed).fail("search loop exceeded"))
 
     def _write_events(self, events: Iterable[bytes]) -> None:
         try:
@@ -1608,7 +1806,7 @@ def stop_gateway(listen: str = LISTEN_DEFAULT) -> None:
 
 
 def _gateway_stamp(upstream: str, api: str, api_key: str = "") -> str:
-    return f"{upstream.rstrip('/')}\n{api}\n{_key_fp(api_key)}\n"
+    return f"{upstream.rstrip('/')}\n{api}\n{_key_fp(api_key)}\n{_key_fp(perplexity_api_key())}\n"
 
 
 def _key_fp(key: str) -> str:
@@ -1621,11 +1819,14 @@ def _stamp_matches(text: str, upstream: str, api: str, api_key: str = "") -> boo
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if len(lines) < 3:
         return False
-    return (
+    if not (
         lines[0].rstrip("/") == upstream.rstrip("/")
         and lines[1] == api
         and lines[2] == _key_fp(api_key)
-    )
+    ):
+        return False
+    have_pplx = lines[3] if len(lines) > 3 else "-"
+    return have_pplx == _key_fp(perplexity_api_key())
 
 
 def ensure_gateway(
@@ -1746,6 +1947,8 @@ def store_api_key(key: str) -> dict[str, Any]:
         raise ValueError("empty key")
     load_env_file()
     hint = provider_from_key(key)
+    if hint == "perplexity" or key.startswith("pplx-"):
+        return store_perplexity_key(key)
     if hint == "vercel" or key.startswith("vck_"):
         upsert_env({
             "AI_GATEWAY_API_KEY": key,
@@ -1790,9 +1993,38 @@ def store_api_key(key: str) -> dict[str, Any]:
     return out
 
 
+def store_perplexity_key(key: str) -> dict[str, Any]:
+    """Persist PERPLEXITY_API_KEY for provider-executed web search."""
+    key = (key or "").strip()
+    load_env_file()
+    if not key or key.lower() in ("clear", "none", "-"):
+        upsert_env({"PERPLEXITY_API_KEY": None})
+        os.environ.pop("PERPLEXITY_API_KEY", None)
+    else:
+        upsert_env({"PERPLEXITY_API_KEY": key})
+        os.environ["PERPLEXITY_API_KEY"] = key
+    offline = os.environ.get("FXS_UI_LOCAL", "") in ("1", "true", "yes")
+    warn = ""
+    if configured_upstream() and not offline:
+        try:
+            stop_gateway()
+            ensure_gateway()
+        except Exception as e:
+            warn = str(e)
+    out = current_provider()
+    out["saved"] = True
+    if warn:
+        out["warn"] = warn
+    return out
+
+
 def apply_provider(name_or_url: str, model: str = "", api: str = "", key: str = "") -> dict[str, Any]:
     key = (key or "").strip()
     hint = provider_from_key(key)
+    if hint == "perplexity" or key.startswith("pplx-"):
+        store_perplexity_key(key)
+        key = ""
+        hint = ""
     if hint == "vercel" or key.startswith("vck_"):
         return store_api_key(key)
     spec = resolve_provider(name_or_url)

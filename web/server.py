@@ -1087,8 +1087,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _set_key(self, payload: dict) -> None:
         key = str(payload.get("key") or "").strip()
+        kind = str(payload.get("kind") or payload.get("name") or "").strip().lower()
         try:
-            info = gateway.store_api_key(key)
+            if kind == "perplexity" or key.startswith("pplx-"):
+                info = gateway.store_perplexity_key(key)
+            else:
+                info = gateway.store_api_key(key)
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return
@@ -1110,6 +1114,7 @@ class Handler(BaseHTTPRequestHandler):
             "api": info.get("api"),
             "effective_api": info.get("effective_api"),
             "providers": info.get("providers"),
+            "perplexity": info.get("perplexity"),
         }
         if info.get("warn"):
             body["warn"] = info["warn"]

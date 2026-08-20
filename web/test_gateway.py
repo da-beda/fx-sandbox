@@ -195,24 +195,22 @@ class SSE(unittest.TestCase):
         got = s.consume(json.dumps({
             "choices": [{"delta": {"tool_calls": [{
                 "index": 0, "id": "c1",
-                "function": {"name": "web_search", "arguments": '{"query":"https://example.com"}'},
+                "function": {"name": "web_search", "arguments": '{"query":"example domain"}'},
             }]}}],
         }))
         got += s.consume(b'{"choices":[{"finish_reason":"tool_calls"}]}')
-        types = [json.loads(e)["type"] for e in got]
-        self.assertEqual(types, [
-            "tool-input-start", "tool-input-delta", "tool-input-end", "tool-call", "finish",
-        ])
         start = json.loads(got[0])
-        self.assertEqual(start["toolName"], "web_fetch")
-        call = json.loads(got[3])
-        self.assertEqual(call["toolName"], "web_fetch")
-        self.assertEqual(call["input"], {"url": "https://example.com"})
+        self.assertEqual(start["type"], "tool-input-start")
+        self.assertEqual(start["toolName"], "perplexity_search")
+        call = next(json.loads(e) for e in got if json.loads(e)["type"] == "tool-call")
+        self.assertEqual(call["toolName"], "perplexity_search")
+        self.assertEqual(call["input"], {"query": "example domain"})
+        self.assertEqual(s.search_calls()[0]["name"], "perplexity_search")
 
     def test_canonical_tool_name(self):
         self.assertEqual(
             gateway.canonical_tool_name("web_search", ["perplexity_search", "web_fetch"]),
-            "web_fetch",
+            "perplexity_search",
         )
         self.assertEqual(
             gateway.canonical_tool_name("web_fetch", ["perplexity_search", "web_fetch"]),
@@ -220,9 +218,50 @@ class SSE(unittest.TestCase):
         )
         self.assertEqual(
             gateway.canonical_tool_name("perplexity_search", ["perplexity_search", "web_fetch"]),
-            "web_fetch",
+            "perplexity_search",
         )
         self.assertEqual(gateway.canonical_tool_name("bash", ["terminal"]), "terminal")
+        self.assertNotEqual(
+            gateway.canonical_tool_name("web_search", ["perplexity_search", "web_fetch"]),
+            "web_fetch",
+        )
+        self.assertEqual(gateway.canonical_tool_name("list", ["list_files"]), "list_files")
+
+    def test_mark_search_events_drops_search(self):
+        events = [
+            gateway._j({
+                "type": "tool-input-start",
+                "id": "s1",
+                "toolName": "perplexity_search",
+            }),
+            gateway._j({"type": "tool-input-delta", "id": "s1", "delta": '{"query":"q"}'}),
+            gateway._j({"type": "tool-input-end", "id": "s1"}),
+            gateway._j({
+                "type": "tool-call",
+                "toolCallId": "s1",
+                "toolName": "perplexity_search",
+                "input": {"query": "hello world"},
+            }),
+            gateway._j({"type": "text-delta", "delta": "ok"}),
+            gateway._j({"type": "finish", "finishReason": {"unified": "tool-calls"}}),
+        ]
+        out = [json.loads(e) for e in gateway.mark_search_events(events, {"s1"})]
+        self.assertEqual([e["type"] for e in out], ["text-delta"])
+        self.assertEqual(out[0]["delta"], "ok")
+
+    def test_search_is_not_remapped_to_web_fetch(self):
+        s = gateway.Stream(allowed_tools=["perplexity_search", "web_fetch"])
+        got = s.consume(json.dumps({
+            "choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "c1",
+                "function": {"name": "perplexity_search", "arguments": '{"query":"latest rust"}'},
+            }]}}],
+        }))
+        got += s.consume(b'{"choices":[{"finish_reason":"tool_calls"}]}')
+        call = next(json.loads(e) for e in got if json.loads(e)["type"] == "tool-call")
+        self.assertEqual(call["toolName"], "perplexity_search")
+        self.assertEqual(call["input"], {"query": "latest rust"})
+        self.assertNotIn("url", call["input"])
 
     def test_fail_emits_error_finish(self):
         s = gateway.Stream()
@@ -552,6 +591,93 @@ class HTTP(unittest.TestCase):
             gw.shutdown(); up.shutdown()
             gw.server_close(); up.server_close()
 
+    def test_language_model_executes_search_and_continues(self):
+        prev = os.environ.pop("PERPLEXITY_API_KEY", None)
+        posts: list[dict] = []
+
+        class SearchUp(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                return
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                posts.append(body)
+                if len(posts) == 1:
+                    payload = (
+                        b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"s1","function":{"name":"web_search","arguments":"{\\"query\\":\\"hello world\\"}"}}]}}]}\n\n'
+                        b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+                        b'data: [DONE]\n\n'
+                    )
+                else:
+                    payload = (
+                        b'data: {"choices":[{"delta":{"content":"no key yet"}}]}\n\n'
+                        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+                        b'data: [DONE]\n\n'
+                    )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def do_GET(self):
+                self.send_response(404)
+                self.end_headers()
+
+        up = ThreadingHTTPServer(("127.0.0.1", 0), SearchUp)
+        t = threading.Thread(target=up.serve_forever, daemon=True)
+        t.start()
+        gw = gateway.GatewayServer(
+            "127.0.0.1:0",
+            gateway.Upstream(f"http://127.0.0.1:{up.server_address[1]}/v1", "k"),
+        )
+        gt = threading.Thread(target=gw.serve_forever, daemon=True)
+        gt.start()
+        try:
+            body = json.dumps({
+                "prompt": [{"role": "user", "content": "search please"}],
+                "tools": [{
+                    "type": "function",
+                    "name": "perplexity_search",
+                    "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
+                }, {
+                    "type": "function",
+                    "name": "web_fetch",
+                    "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}},
+                }],
+            }).encode()
+            req = Request(
+                f"http://127.0.0.1:{gw.server_address[1]}/v3/ai/language-model",
+                data=body, method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            req.add_header("ai-language-model-id", "m")
+            req.add_header("ai-language-model-streaming", "true")
+            r = urlopen(req, timeout=4)
+            text = r.read().decode()
+            self.assertIn("no key yet", text)
+            self.assertNotIn("web_fetch", text)
+            self.assertNotIn("providerExecuted", text)
+            self.assertNotIn('"toolName":"perplexity_search"', text)
+            self.assertEqual(len(posts), 2)
+            roles = [m.get("role") for m in posts[1].get("messages") or []]
+            self.assertIn("tool", roles)
+            tool_msg = next(m for m in posts[1]["messages"] if m.get("role") == "tool")
+            self.assertIn("Perplexity API key", tool_msg.get("content") or "")
+            # OpenRouter sees a query field even if fx advertised an empty schema.
+            tools = posts[0].get("tools") or []
+            fn = tools[0]["function"]
+            self.assertEqual(fn["name"], "perplexity_search")
+            self.assertIn("query", (fn.get("parameters") or {}).get("properties") or {})
+        finally:
+            gw.shutdown(); up.shutdown()
+            gw.server_close(); up.server_close()
+            if prev is None:
+                os.environ.pop("PERPLEXITY_API_KEY", None)
+            else:
+                os.environ["PERPLEXITY_API_KEY"] = prev
+
 
 class IsolatedApply(unittest.TestCase):
     def setUp(self):
@@ -576,6 +702,7 @@ class IsolatedApply(unittest.TestCase):
             "XAI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY",
             "FX_GATEWAY_BASE_URL",
             "FX_GATEWAY_CHAT_URL", "FX_UPSTREAM_API",
+            "PERPLEXITY_API_KEY",
         ):
             self.prev_env[k] = os.environ.pop(k, None)
         os.environ["FXS_UI_LOCAL"] = "1"
@@ -719,7 +846,84 @@ class IsolatedApply(unittest.TestCase):
         self.assertEqual(gateway.provider_from_key("vck_abc"), "vercel")
         self.assertEqual(gateway.provider_from_key("sk-or-v1-abc"), "openrouter")
         self.assertEqual(gateway.provider_from_key("xai-secret"), "xai")
+        self.assertEqual(gateway.provider_from_key("pplx-abc"), "perplexity")
         self.assertEqual(gateway.provider_from_key("sk-proj-openai"), "")
+
+    def test_store_perplexity_key(self):
+        out = gateway.store_perplexity_key("pplx-testkey")
+        self.assertTrue(out.get("perplexity"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["PERPLEXITY_API_KEY"], "pplx-testkey")
+        self.assertEqual(out.get("id"), "vercel")
+        out = gateway.store_api_key("pplx-from-main-field")
+        self.assertTrue(out.get("perplexity"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["PERPLEXITY_API_KEY"], "pplx-from-main-field")
+        self.assertNotIn("OPENAI_API_KEY", saved)
+
+    def test_run_perplexity_search_needs_key(self):
+        out = gateway.run_perplexity_search({"query": "hello"})
+        self.assertIn("Perplexity API key", out.get("error", ""))
+        self.assertEqual(gateway.run_perplexity_search({}).get("error"), "search query is required")
+        out = gateway.run_perplexity_search({}, fallback_query="hello world")
+        self.assertIn("Perplexity API key", out.get("error", ""))
+        self.assertNotEqual(out.get("error"), "search query is required")
+
+    def test_chat_request_enriches_search_schema(self):
+        req = gateway.chat_request("m", False, json.dumps({
+            "prompt": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "name": "perplexity_search",
+                       "inputSchema": {"type": "object", "properties": {}}}],
+        }).encode())
+        fn = req["tools"][0]["function"]
+        self.assertIn("query", fn["parameters"]["properties"])
+        self.assertIn("query", fn["parameters"].get("required") or [])
+
+    def test_run_perplexity_search_parses_results(self):
+        import urllib.request
+        os.environ["PERPLEXITY_API_KEY"] = "pplx-test"
+        class FakeResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def read(self):
+                return json.dumps({"results": [{
+                    "title": "Example",
+                    "url": "https://example.com",
+                    "snippet": "hi",
+                    "last_updated": "2026-01-01",
+                }]}).encode()
+        orig = urllib.request.urlopen
+        def fake_open(req, timeout=None):
+            self.assertIn("api.perplexity.ai/search", req.full_url)
+            self.assertEqual(req.get_header("Authorization") or req.headers.get("Authorization"), "Bearer pplx-test")
+            return FakeResp()
+        urllib.request.urlopen = fake_open
+        try:
+            out = gateway.run_perplexity_search({"query": "hello world", "maxResults": 3})
+        finally:
+            urllib.request.urlopen = orig
+        self.assertEqual(out["query"], "hello world")
+        self.assertEqual(out["results"][0]["url"], "https://example.com")
+        self.assertEqual(out["results"][0]["date"], "2026-01-01")
+
+    def test_apply_provider_pplx_key_does_not_switch(self):
+        gateway.apply_provider("openrouter", key="sk-or-v1-test")
+        out = gateway.apply_provider("openrouter", key="pplx-secret")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertTrue(out.get("perplexity"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["PERPLEXITY_API_KEY"], "pplx-secret")
+        self.assertEqual(saved["OPENAI_API_KEY"], "sk-or-v1-test")
+
+    def test_stamp_changes_with_perplexity_key(self):
+        a = gateway._gateway_stamp("https://openrouter.ai/api/v1", "auto", "sk-or-a")
+        os.environ["PERPLEXITY_API_KEY"] = "pplx-x"
+        b = gateway._gateway_stamp("https://openrouter.ai/api/v1", "auto", "sk-or-a")
+        self.assertNotEqual(a, b)
+        self.assertFalse(gateway._stamp_matches(a, "https://openrouter.ai/api/v1", "auto", "sk-or-a"))
+        self.assertTrue(gateway._stamp_matches(b, "https://openrouter.ai/api/v1", "auto", "sk-or-a"))
 
     def test_openrouter_env_key_is_read(self):
         os.environ["OPENROUTER_API_KEY"] = "sk-or-from-env"
