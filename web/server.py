@@ -153,7 +153,108 @@ SKIP_DIRS = {
     ".git", "node_modules", ".venv", "dist", "target", "__pycache__",
     ".fx", ".next", "vendor",
 }
-IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico"}
+MAX_FILE = 1_200_000
+MAX_TREE = 900
+
+
+def resolve_in_ws(ws: str, rel: str) -> tuple[Path, str]:
+    rel = (rel or "").replace("\\", "/").lstrip("/")
+    if not rel or rel in (".", "..") or any(p in ("..", "") for p in Path(rel).parts):
+        raise ValueError("bad path")
+    root = Path(ws).resolve()
+    full = (root / rel).resolve()
+    try:
+        full.relative_to(root)
+    except ValueError as e:
+        raise ValueError("outside workspace") from e
+    return full, rel.replace("\\", "/")
+
+
+def is_binary_bytes(data: bytes) -> bool:
+    if not data:
+        return False
+    sample = data[:8192]
+    if b"\x00" in sample:
+        return True
+    try:
+        sample.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        return True
+
+
+def list_tree(ws: str) -> dict:
+    root = Path(ws)
+    count = [0]
+
+    def kids(dirpath: Path, rel: str) -> list:
+        out = []
+        try:
+            items = sorted(dirpath.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except OSError:
+            return out
+        for p in items:
+            if count[0] >= MAX_TREE:
+                break
+            if p.name.startswith(".") and p.name not in {".gitignore", ".env.example"}:
+                continue
+            if p.is_dir() and p.name in SKIP_DIRS:
+                continue
+            r = p.name if not rel else f"{rel}/{p.name}"
+            count[0] += 1
+            if p.is_dir():
+                out.append({"name": p.name, "path": r, "type": "dir", "children": kids(p, r)})
+            else:
+                try:
+                    sz = p.stat().st_size
+                except OSError:
+                    sz = 0
+                out.append({"name": p.name, "path": r, "type": "file", "size": sz})
+        return out
+
+    children = kids(root, "")
+    return {
+        "name": root.name,
+        "path": "",
+        "type": "dir",
+        "truncated": count[0] >= MAX_TREE,
+        "children": children,
+    }
+
+
+def read_workspace_file(ws: str, rel: str) -> dict:
+    full, rel = resolve_in_ws(ws, rel)
+    if not full.is_file():
+        raise ValueError("not a file")
+    size = full.stat().st_size
+    ext = full.suffix.lower()
+    if size > MAX_FILE:
+        return {"path": rel, "name": full.name, "binary": True, "too_large": True, "size": size}
+    data = full.read_bytes()
+    if ext in IMAGE_EXT and ext != ".svg":
+        return {"path": rel, "name": full.name, "image": True, "size": size, "ext": ext}
+    if is_binary_bytes(data):
+        return {"path": rel, "name": full.name, "binary": True, "size": size}
+    text = data.decode("utf-8")
+    return {"path": rel, "name": full.name, "content": text, "size": size}
+
+
+def write_workspace_file(ws: str, rel: str, content: str) -> dict:
+    full, rel = resolve_in_ws(ws, rel)
+    if full.suffix.lower() in IMAGE_EXT:
+        raise ValueError("cannot write image")
+    if not full.exists():
+        raise ValueError("missing")
+    if not full.is_file():
+        raise ValueError("not a file")
+    raw = content.encode("utf-8")
+    if len(raw) > MAX_FILE:
+        raise ValueError("too large")
+    full.write_bytes(raw)
+    return {"path": rel, "size": len(raw), "ok": True}
+
+
 SAFE_FX = {
     "models", "usage", "credits", "balance", "permissions", "status",
     "doctor", "sessions", "workspace", "help", "version",
@@ -311,10 +412,12 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/api/status":
             qs = parse_qs(u.query)
-            ws = (qs.get("workspace") or [default_workspace()])[0]
+            default = default_workspace()
+            ws = (qs.get("workspace") or [default])[0]
             self._json(200, {
                 "demo": demo_mode(),
                 "workspace": ws,
+                "default_workspace": default,
                 "model": MODEL,
                 "key": has_key(),
                 "docker": docker_state(),
@@ -342,19 +445,45 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(e), "files": []})
                 return
             q = (qs.get("q") or [""])[0]
-            if demo_mode():
-                demo = (
-                    "README.md", "setup-fx.sh", "web/index.html", "web/app.js",
-                    "web/app.css", "web/server.py", "Dockerfile", "run-fx.sh",
-                )
-                ranked = sorted(
-                    ((fuzzy_score(q, p), p) for p in demo),
-                    key=lambda x: (-x[0], x[1]),
-                )
-                files = [p for s, p in ranked if not q or s > 0]
-                self._json(200, {"files": files})
-                return
             self._json(200, {"files": list_files(ws, q)})
+            return
+        if u.path == "/api/tree":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, list_tree(ws))
+            return
+        if u.path == "/api/file":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+                data = read_workspace_file(ws, (qs.get("path") or [""])[0])
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, data)
+            return
+        if u.path == "/api/raw":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+                full, rel = resolve_in_ws(ws, (qs.get("path") or [""])[0])
+            except ValueError:
+                self._send(404, b"not found", "text/plain")
+                return
+            if not full.is_file() or full.stat().st_size > MAX_FILE:
+                self._send(404, b"not found", "text/plain")
+                return
+            ext = full.suffix.lower()
+            ctype = {
+                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+                ".ico": "image/x-icon",
+            }.get(ext, "application/octet-stream")
+            self._send(200, full.read_bytes(), ctype)
             return
         self._static(u.path)
 
@@ -394,6 +523,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/ask":
             self._ask(payload)
+            return
+        if u.path == "/api/file":
+            try:
+                ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
+                out = write_workspace_file(ws, str(payload.get("path") or ""), str(payload.get("content") or ""))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, out)
             return
         if u.path == "/api/fx":
             self._fx(payload)

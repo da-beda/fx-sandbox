@@ -12,6 +12,27 @@
   const activity = $("activity");
   const permBtn = $("perm-btn");
   const html = document.documentElement;
+  const mac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+  const mod = mac ? "⌘" : "Ctrl+";
+
+  const ICO = {
+    chev: '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    folder: '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M2.5 4.5h4l1 1.5h6v7.5h-11z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+    file: '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M4.5 2.5h5l3 3v8h-8zM9.5 2.5v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+    image: '<svg viewBox="0 0 16 16" width="14" height="14"><rect x="2.5" y="3.5" width="11" height="9" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2.8 11.2 6 8.2l2.2 2.2 2-1.8 3 2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="5.2" cy="6.2" r="0.9" fill="currentColor"/></svg>',
+    go: '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5h6.5V10M12.5 3.5 3.5 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  };
+
+  const IMG_EXT = /\.(png|jpe?g|gif|webp|ico)$/i;
+
+  function readJson(key, fallback) {
+    try {
+      const v = JSON.parse(localStorage.getItem(key) || "null");
+      return v == null ? fallback : v;
+    } catch {
+      return fallback;
+    }
+  }
 
   const state = {
     workspace: localStorage.getItem("fxs.workspace") || "",
@@ -20,18 +41,42 @@
     resume: localStorage.getItem("fxs.resume") || "last",
     perm: localStorage.getItem("fxs.perm") || (localStorage.getItem("fxs.yolo") === "0" ? "auto" : "yolo"),
     theme: localStorage.getItem("fxs.theme") || "system",
-    history: JSON.parse(localStorage.getItem("fxs.history") || "[]"),
+    history: readJson("fxs.history", []),
     histIdx: -1,
     abort: null,
     model: "",
     queue: [],
     lastAnswer: "",
+    treeOn: localStorage.getItem("fxs.tree") !== "0",
+    expanded: Object.fromEntries((readJson("fxs.expanded", []) || []).map((k) => [k, true])),
+    openPath: "",
+    orig: "",
+    wrap: localStorage.getItem("fxs.wrap") === "1",
+    treeW: parseInt(localStorage.getItem("fxs.treeW") || "0", 10) || 0,
+    edW: parseInt(localStorage.getItem("fxs.edW") || "0", 10) || 0,
+    treeData: null,
+    edSize: 0,
   };
 
   function basename(p) {
     if (!p) return "project";
     const parts = p.replace(/\/+$/, "").split("/");
     return parts[parts.length - 1] || p;
+  }
+
+  function dirname(p) {
+    const i = (p || "").lastIndexOf("/");
+    return i <= 0 ? "" : p.slice(0, i);
+  }
+
+  function prettySize(n) {
+    n = Number(n) || 0;
+    if (n < 1000) return n + " B";
+    if (n < 1024 * 1024) {
+      const k = n / 1024;
+      return (k < 10 ? k.toFixed(1) : Math.round(k)) + " KB";
+    }
+    return (n / 1048576).toFixed(1) + " MB";
   }
 
   function applyTheme() {
@@ -50,6 +95,7 @@
     if (state.workspace) localStorage.setItem("fxs.workspace", state.workspace);
     projectName.textContent = basename(state.workspace);
     $("project").title = state.workspace || "Workspace";
+    if (state.treeOn) loadTree();
   }
 
   function setPerm(p) {
@@ -135,6 +181,7 @@
     { id: "usage", hint: "Local spend" },
     { id: "credits", hint: "Gateway balance" },
     { id: "doctor", hint: "Preflight" },
+    { id: "files", hint: "Toggle explorer" },
     { id: "help", hint: "Commands" },
   ];
 
@@ -159,6 +206,9 @@
 
   function renderPalette() {
     paletteList.innerHTML = "";
+    $("palette-hint").textContent = pal.kind === "@"
+      ? "Enter to mention  ·  Shift+Enter to open"
+      : "Enter to run";
     if (!pal.items.length) {
       const li = document.createElement("li");
       li.className = "empty";
@@ -172,12 +222,35 @@
       const li = document.createElement("li");
       li.setAttribute("role", "option");
       li.setAttribute("aria-selected", i === pal.idx ? "true" : "false");
-      li.innerHTML = '<span class="name">' + mark(it.label, pal.query) + "</span>" +
-        (it.hint ? '<span class="hint">' + esc(it.hint) + "</span>" : "");
+      const name = document.createElement("span");
+      name.className = "name";
+      name.innerHTML = mark(it.label, pal.query);
+      li.appendChild(name);
+      if (it.hint) {
+        const hint = document.createElement("span");
+        hint.className = "hint";
+        hint.textContent = it.hint;
+        li.appendChild(hint);
+      }
+      if (pal.kind === "@") {
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "pal-go";
+        go.title = "Open";
+        go.innerHTML = ICO.go;
+        go.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pal.idx = i;
+          pickPalette(true);
+        });
+        li.appendChild(go);
+      }
       li.addEventListener("mousedown", (e) => {
+        if (e.target.closest(".pal-go")) return;
         e.preventDefault();
         pal.idx = i;
-        pickPalette();
+        pickPalette(e.altKey || e.metaKey || e.shiftKey);
       });
       paletteList.appendChild(li);
     });
@@ -222,7 +295,7 @@
     }, 70);
   }
 
-  function pickPalette() {
+  function pickPalette(openFileToo) {
     const it = pal.items[pal.idx];
     if (!it) { hidePalette(); return; }
     if (pal.kind === "/") {
@@ -239,6 +312,20 @@
     const pos = pal.start + it.id.length + 2;
     promptEl.setSelectionRange(pos, pos);
     hidePalette();
+    grow();
+    promptEl.focus();
+    if (openFileToo) openFile(it.id);
+  }
+
+  function mention(path) {
+    if (!path) return;
+    const v = promptEl.value;
+    const caret = promptEl.selectionStart || v.length;
+    const need = caret > 0 && !/\s$/.test(v.slice(0, caret)) ? " " : "";
+    const ins = need + "@" + path + " ";
+    promptEl.value = v.slice(0, caret) + ins + v.slice(caret);
+    const pos = caret + ins.length;
+    promptEl.setSelectionRange(pos, pos);
     grow();
     promptEl.focus();
   }
@@ -270,6 +357,7 @@
     }
     if (id === "models") { openModels(); return; }
     if (id === "permissions") { cyclePerm(); return; }
+    if (id === "files") { toggleTree(); return; }
     if (id === "help") {
       showInfo("Commands", COMMANDS.map((c) => "/" + c.id + "  " + c.hint).join("\n"));
       return;
@@ -320,6 +408,373 @@
     $("models-dlg").showModal();
   }
 
+  function mobile() {
+    return window.matchMedia("(max-width: 860px)").matches;
+  }
+
+  function syncChrome() {
+    const edOn = !$("editor").hidden;
+    $("split-tree").hidden = !state.treeOn || mobile();
+    $("split-ed").hidden = !edOn || mobile();
+    $("veil").hidden = !(mobile() && (state.treeOn || edOn));
+    $("files-btn").classList.toggle("on", state.treeOn);
+  }
+
+  function toggleTree(force) {
+    state.treeOn = typeof force === "boolean" ? force : !state.treeOn;
+    localStorage.setItem("fxs.tree", state.treeOn ? "1" : "0");
+    $("tree").hidden = !state.treeOn;
+    if (state.treeW && state.treeOn && !mobile()) $("tree").style.width = state.treeW + "px";
+    syncChrome();
+    if (state.treeOn) loadTree();
+  }
+
+  function persistExpanded() {
+    const on = Object.keys(state.expanded).filter((k) => state.expanded[k]).slice(0, 80);
+    localStorage.setItem("fxs.expanded", JSON.stringify(on));
+  }
+
+  function expandTo(rel) {
+    const parts = (rel || "").split("/");
+    let acc = "";
+    for (let i = 0; i < parts.length - 1; i++) {
+      acc = acc ? acc + "/" + parts[i] : parts[i];
+      state.expanded[acc] = true;
+    }
+    persistExpanded();
+  }
+
+  function flatten(nodes, acc) {
+    (nodes || []).forEach((n) => {
+      acc.push(n);
+      if (n.children) flatten(n.children, acc);
+    });
+    return acc;
+  }
+
+  function matchNode(node, q) {
+    if (!q) return true;
+    if (fuzzy(q, node.path || node.name) > 0) return true;
+    return (node.children || []).some((c) => matchNode(c, q));
+  }
+
+  function fileIcon(name) {
+    return IMG_EXT.test(name) ? ICO.image : ICO.file;
+  }
+
+  function treeButton(n, depth, q, flat) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tree-item" + (n.path === state.openPath ? " on" : "") +
+      (n.type === "dir" && (state.expanded[n.path] || q) ? " open" : "");
+    b.style.paddingLeft = (flat ? 8 : 8 + depth * 12) + "px";
+    b.tabIndex = -1;
+    b.dataset.path = n.path || "";
+    b.dataset.type = n.type;
+    b.setAttribute("role", "treeitem");
+    if (n.type === "dir") b.setAttribute("aria-expanded", state.expanded[n.path] || q ? "true" : "false");
+
+    const chev = document.createElement("span");
+    chev.className = "chev";
+    chev.innerHTML = n.type === "dir" ? ICO.chev : "";
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.innerHTML = n.type === "dir" ? ICO.folder : fileIcon(n.name);
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.innerHTML = q ? mark(n.name, q) : esc(n.name);
+    b.appendChild(chev);
+    b.appendChild(kind);
+    b.appendChild(nm);
+    if (flat && n.path && n.path !== n.name) {
+      const sub = document.createElement("span");
+      sub.className = "sub";
+      sub.textContent = dirname(n.path);
+      b.appendChild(sub);
+    }
+    if (n.type === "file") {
+      const at = document.createElement("span");
+      at.className = "at";
+      at.textContent = "@";
+      at.title = "Mention";
+      at.addEventListener("click", (e) => {
+        e.stopPropagation();
+        mention(n.path);
+      });
+      b.appendChild(at);
+      b.draggable = true;
+      b.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", "@" + n.path + " ");
+        e.dataTransfer.effectAllowed = "copy";
+      });
+    }
+    b.addEventListener("click", (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        mention(n.path || n.name);
+        return;
+      }
+      if (n.type === "dir") {
+        if (q) {
+          $("tree-q").value = "";
+          expandTo(n.path + "/x");
+          state.expanded[n.path] = true;
+          persistExpanded();
+          renderTree(n.path);
+          return;
+        }
+        state.expanded[n.path] = !state.expanded[n.path];
+        persistExpanded();
+        renderTree();
+      } else openFile(n.path);
+    });
+    return b;
+  }
+
+  function renderTree(scrollTo) {
+    const host = $("tree-list");
+    const q = ($("tree-q").value || "").trim();
+    host.innerHTML = "";
+    const data = state.treeData;
+    if (!data || !(data.children || []).length) {
+      const p = document.createElement("p");
+      p.className = "tree-empty";
+      if (!state.workspace) {
+        p.appendChild(document.createTextNode("Open a folder to browse the same files the agent sees."));
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "Open folder";
+        btn.addEventListener("click", () => $("project").click());
+        p.appendChild(document.createElement("br"));
+        p.appendChild(btn);
+      } else {
+        p.textContent = "Nothing here.";
+      }
+      host.appendChild(p);
+      $("tree-count").textContent = "";
+      return;
+    }
+
+    const total = flatten(data.children || [], []).filter((n) => n.type === "file").length;
+    $("tree-count").textContent = q ? "" : (total ? String(total) : "");
+
+    if (q) {
+      const rows = flatten(data.children, [])
+        .map((n) => ({ n, s: fuzzy(q, n.path || n.name) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => b.s - a.s || a.n.path.localeCompare(b.n.path))
+        .slice(0, 80);
+      rows.forEach((x) => host.appendChild(treeButton(x.n, 0, q, true)));
+    } else {
+      function draw(nodes, depth) {
+        nodes.forEach((n) => {
+          host.appendChild(treeButton(n, depth, "", false));
+          if (n.type === "dir" && state.expanded[n.path] && n.children) draw(n.children, depth + 1);
+        });
+      }
+      draw(data.children || [], 0);
+    }
+    if (!host.querySelector(".tree-item")) {
+      const p = document.createElement("p");
+      p.className = "tree-empty";
+      p.textContent = "No match.";
+      host.appendChild(p);
+      $("tree-count").textContent = "";
+    } else if (q) {
+      const n = host.querySelectorAll(".tree-item").length;
+      $("tree-count").textContent = String(n);
+    }
+    const target = scrollTo || state.openPath;
+    if (target) {
+      const el = [...host.querySelectorAll(".tree-item")].find((x) => x.dataset.path === target);
+      if (el) el.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  async function loadTree() {
+    const host = $("tree-list");
+    if (!state.workspace) {
+      renderTree();
+      return;
+    }
+    host.classList.add("dim");
+    try {
+      const data = await (await fetch("/api/tree?workspace=" + encodeURIComponent(state.workspace))).json();
+      if (data.error) throw new Error(data.error);
+      state.treeData = data;
+      if (data.children) {
+        data.children.forEach((n) => {
+          if (n.type === "dir" && state.expanded[n.path] === undefined) state.expanded[n.path] = true;
+        });
+      }
+      renderTree();
+    } catch (e) {
+      host.innerHTML = '<p class="tree-empty">' + esc(String(e.message || e)) + "</p>";
+      $("tree-count").textContent = "";
+    } finally {
+      host.classList.remove("dim");
+    }
+  }
+
+  function showEditor(on) {
+    $("editor").hidden = !on;
+    if (on && state.edW && !mobile()) $("editor").style.width = state.edW + "px";
+    if (mobile()) {
+      if (on) $("tree").hidden = true;
+      else $("tree").hidden = !state.treeOn;
+    }
+    syncChrome();
+  }
+
+  function setDirty(on) {
+    $("ed-dirty").hidden = !on;
+    $("ed-save").hidden = !on;
+    $("ed-save").textContent = "Save";
+  }
+
+  function setEdMode(mode) {
+    $("ed-code").hidden = mode !== "code";
+    $("ed-preview").hidden = mode !== "image";
+    $("ed-note").hidden = mode !== "note";
+  }
+
+  function applyWrap() {
+    $("ed-body").classList.toggle("wrap", state.wrap);
+    $("ed-body").wrap = state.wrap ? "soft" : "off";
+    $("ed-wrap").classList.toggle("on", state.wrap);
+    $("ed-gutter").style.display = state.wrap ? "none" : "";
+    localStorage.setItem("fxs.wrap", state.wrap ? "1" : "0");
+  }
+
+  function updateGutter() {
+    const a = $("ed-body");
+    const g = $("ed-gutter");
+    if (state.wrap || $("ed-code").hidden) return;
+    const n = a.value ? a.value.split("\n").length : 1;
+    if ((g.dataset.n | 0) !== n) {
+      let s = "";
+      for (let i = 1; i <= n; i++) s += i + "\n";
+      g.textContent = s;
+      g.dataset.n = String(n);
+    }
+    g.scrollTop = a.scrollTop;
+  }
+
+  function updateLoc() {
+    const a = $("ed-body");
+    if ($("ed-code").hidden) {
+      $("ed-loc").textContent = "";
+      return;
+    }
+    const pos = a.selectionStart || 0;
+    const up = a.value.slice(0, pos);
+    const lines = up.split("\n");
+    $("ed-loc").textContent = "Ln " + lines.length + ", Col " + (lines[lines.length - 1].length + 1);
+    $("ed-size").textContent = prettySize(state.edSize || new Blob([a.value]).size);
+  }
+
+  function setEdTitle(rel) {
+    const name = basename(rel);
+    const dir = dirname(rel);
+    $("ed-name").textContent = name;
+    $("ed-dir").textContent = dir ? dir + "/" : "";
+    $("ed-id").title = "Copy path · " + rel;
+  }
+
+  async function openFile(rel) {
+    if (!rel || !state.workspace) return;
+    if (!$("ed-code").hidden && !$("ed-dirty").hidden) await saveFile();
+    try {
+      const data = await (await fetch(
+        "/api/file?workspace=" + encodeURIComponent(state.workspace) + "&path=" + encodeURIComponent(rel)
+      )).json();
+      if (data.error) throw new Error(data.error);
+      state.openPath = data.path || rel;
+      state.edSize = data.size || 0;
+      setEdTitle(state.openPath);
+      setDirty(false);
+      showEditor(true);
+      expandTo(state.openPath);
+      if (data.image) {
+        setEdMode("image");
+        $("ed-preview").innerHTML = '<img alt="" src="/api/raw?workspace=' +
+          encodeURIComponent(state.workspace) + "&path=" + encodeURIComponent(state.openPath) + '">';
+        $("ed-loc").textContent = "Image";
+        $("ed-size").textContent = prettySize(data.size);
+      } else if (data.binary || data.too_large) {
+        setEdMode("note");
+        $("ed-note").textContent = data.too_large
+          ? "Too large to open · " + prettySize(data.size)
+          : "Binary · " + prettySize(data.size);
+        $("ed-loc").textContent = "";
+        $("ed-size").textContent = prettySize(data.size);
+      } else {
+        setEdMode("code");
+        $("ed-body").value = data.content || "";
+        state.orig = $("ed-body").value;
+        state.edSize = new Blob([state.orig]).size;
+        applyWrap();
+        $("ed-body").setSelectionRange(0, 0);
+        $("ed-body").scrollTop = 0;
+        updateGutter();
+        updateLoc();
+        $("ed-body").focus();
+      }
+      if (!mobile()) toggleTree(true);
+      renderTree(state.openPath);
+    } catch (e) {
+      showInfo("File", String(e.message || e));
+    }
+  }
+
+  async function closeEditor() {
+    if (!$("ed-code").hidden && !$("ed-dirty").hidden) await saveFile();
+    showEditor(false);
+    state.openPath = "";
+    state.orig = "";
+    setDirty(false);
+    renderTree();
+    promptEl.focus();
+  }
+
+  async function saveFile() {
+    if (!state.openPath || $("ed-code").hidden) return;
+    const content = $("ed-body").value;
+    try {
+      const r = await fetch("/api/file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: state.workspace, path: state.openPath, content }),
+      });
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || "save failed");
+      state.orig = content;
+      state.edSize = data.size || new Blob([content]).size;
+      setDirty(false);
+      $("ed-save").textContent = "Saved";
+      $("ed-save").hidden = false;
+      updateLoc();
+      setTimeout(() => {
+        if ($("ed-body").value === state.orig) {
+          $("ed-save").hidden = true;
+          $("ed-save").textContent = "Save";
+        }
+      }, 900);
+    } catch (e) {
+      showInfo("Save", String(e.message || e));
+    }
+  }
+
+  async function copyPath() {
+    if (!state.openPath) return;
+    try {
+      await navigator.clipboard.writeText(state.openPath);
+      const n = $("ed-name");
+      const t = n.textContent;
+      n.textContent = "Copied";
+      setTimeout(() => { if (n.textContent === "Copied") n.textContent = t; }, 800);
+    } catch { /* ignore */ }
+  }
+
   function render(src) {
     const parts = [];
     const re = /```[\s\S]*?```/g;
@@ -338,6 +793,12 @@
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/\n/g, "<br>");
+  }
+
+  function renderUser(text) {
+    return esc(text).replace(/@([A-Za-z0-9_./@+-][A-Za-z0-9_./+-]*)/g, (m, p) =>
+      '<button type="button" class="mention" data-path="' + esc(p) + '">@' + esc(p) + "</button>"
+    );
   }
 
   function decorate(el) {
@@ -360,7 +821,7 @@
   function addMsg(kind, text) {
     const el = document.createElement("div");
     el.className = "msg " + kind;
-    if (kind === "user") el.textContent = text;
+    if (kind === "user") el.innerHTML = renderUser(text);
     else if (kind === "tools") el.innerHTML = text;
     else {
       el.innerHTML = render(text || "");
@@ -388,7 +849,11 @@
       const s = await (await fetch("/api/status" + q)).json();
       state.demo = !!s.demo;
       state.model = s.model || "";
-      if (!state.workspace && s.workspace) setWorkspace(s.workspace);
+      if (s.default_workspace && (!state.workspace || state.workspace === "/workspace")) {
+        setWorkspace(s.default_workspace);
+      } else if (!state.workspace && s.workspace) {
+        setWorkspace(s.workspace);
+      }
       const bits = [];
       if (s.demo) bits.push('<span class="dot off"></span>demo');
       else bits.push('<span class="dot"></span>' + (s.model || "fxs"));
@@ -474,11 +939,6 @@
       setActivity("queued · " + state.queue.length);
       return;
     }
-    if (!state.workspace) {
-      folderDlg.showModal();
-      folderInput.focus();
-      return;
-    }
     setBusy(true);
     addMsg("user", text);
     promptEl.value = "";
@@ -534,7 +994,8 @@
             const row = addMsg("tools", ev.tools.map((t) => {
               const name = t.name || t;
               const path = t.path || "";
-              return '<span class="tool">' + esc(name) + (path ? " " + esc(path) : "") + "</span>";
+              return '<span class="tool"' + (path ? ' data-path="' + esc(path) + '"' : "") + ">" +
+                esc(name) + (path ? " " + esc(path) : "") + "</span>";
             }).join(""));
             thread.insertBefore(row, bot);
           } else if (ev.type === "session" && ev.id) {
@@ -560,11 +1021,41 @@
       state.abort = null;
       promptEl.focus();
       refreshStatus();
+      if (state.treeOn) loadTree();
       if (state.queue.length) {
         const next = state.queue.shift();
         send(next);
       }
     }
+  }
+
+  function bindSplit(el, side) {
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const pane = side === "tree" ? $("tree") : $("editor");
+      const startW = pane.getBoundingClientRect().width;
+      const move = (ev) => {
+        const dx = ev.clientX - startX;
+        if (side === "tree") {
+          const w = Math.min(420, Math.max(180, startW + dx));
+          pane.style.width = w + "px";
+          state.treeW = w;
+        } else {
+          const w = Math.min(Math.floor(window.innerWidth * 0.7), Math.max(240, startW - dx));
+          pane.style.width = w + "px";
+          state.edW = w;
+        }
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        if (state.treeW) localStorage.setItem("fxs.treeW", String(state.treeW));
+        if (state.edW) localStorage.setItem("fxs.edW", String(state.edW));
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    });
   }
 
   $("composer").addEventListener("submit", (e) => {
@@ -589,7 +1080,12 @@
       }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         e.preventDefault();
-        pickPalette();
+        pickPalette(false);
+        return;
+      }
+      if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        pickPalette(true);
         return;
       }
       if (e.key === "Escape") {
@@ -618,7 +1114,109 @@
     }
   });
   document.addEventListener("keydown", (e) => {
+    const metaKey = e.metaKey || e.ctrlKey;
     if (e.key === "Escape" && state.busy) stop();
+    if (metaKey && e.key.toLowerCase() === "s") {
+      if (!$("editor").hidden) { e.preventDefault(); saveFile(); }
+    }
+    if (metaKey && e.key.toLowerCase() === "b") {
+      e.preventDefault();
+      toggleTree();
+    }
+    if (metaKey && e.key.toLowerCase() === "p") {
+      e.preventDefault();
+      toggleTree(true);
+      $("tree-q").focus();
+      $("tree-q").select();
+    }
+  });
+
+  thread.addEventListener("click", (e) => {
+    const mentionBtn = e.target.closest(".mention");
+    if (mentionBtn && mentionBtn.dataset.path) {
+      openFile(mentionBtn.dataset.path);
+      return;
+    }
+    const t = e.target.closest(".tool");
+    if (!t) return;
+    const path = t.dataset.path || t.textContent.trim().split(/\s+/).slice(1).join(" ");
+    if (path) openFile(path);
+  });
+
+  $("files-btn").title = "Files · " + mod + "B";
+  $("files-btn").addEventListener("click", () => {
+    if (mobile() && !$("editor").hidden) {
+      closeEditor().then(() => toggleTree(true));
+      return;
+    }
+    toggleTree();
+  });
+  $("tree-q").addEventListener("input", renderTree);
+  $("tree-q").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const first = $("tree-list").querySelector(".tree-item");
+      if (first) first.focus();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const files = $("tree-list").querySelectorAll('.tree-item[data-type="file"]');
+      if (files.length) openFile(files[0].dataset.path);
+    } else if (e.key === "Escape") {
+      if ($("tree-q").value) {
+        $("tree-q").value = "";
+        renderTree();
+      } else promptEl.focus();
+    }
+  });
+  $("tree-list").addEventListener("keydown", (e) => {
+    const items = [...$("tree-list").querySelectorAll(".tree-item")];
+    if (!items.length) return;
+    const i = Math.max(0, items.indexOf(document.activeElement));
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      items[Math.min(i + 1, items.length - 1)].focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (i <= 0) $("tree-q").focus();
+      else items[i - 1].focus();
+    } else if (e.key === "ArrowRight") {
+      const el = items[i];
+      if (el && el.dataset.type === "dir" && !el.classList.contains("open")) el.click();
+      else if (el && el.dataset.type === "file") openFile(el.dataset.path);
+    } else if (e.key === "ArrowLeft") {
+      const el = items[i];
+      if (el && el.dataset.type === "dir" && el.classList.contains("open")) el.click();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      items[i].click();
+    }
+  });
+  $("ed-save").addEventListener("click", saveFile);
+  $("ed-close").addEventListener("click", closeEditor);
+  $("ed-id").addEventListener("click", copyPath);
+  $("ed-wrap").addEventListener("click", () => {
+    state.wrap = !state.wrap;
+    applyWrap();
+    updateGutter();
+  });
+  $("ed-body").addEventListener("input", () => {
+    setDirty($("ed-body").value !== state.orig);
+    updateGutter();
+    updateLoc();
+  });
+  $("ed-body").addEventListener("scroll", () => { $("ed-gutter").scrollTop = $("ed-body").scrollTop; });
+  $("ed-body").addEventListener("keyup", updateLoc);
+  $("ed-body").addEventListener("click", updateLoc);
+  $("ed-body").addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const a = $("ed-body");
+      const s = a.selectionStart, n = a.selectionEnd;
+      a.value = a.value.slice(0, s) + "  " + a.value.slice(n);
+      a.selectionStart = a.selectionEnd = s + 2;
+      setDirty(true);
+      updateGutter();
+    }
   });
 
   $("project").addEventListener("click", () => {
@@ -647,14 +1245,25 @@
   permBtn.addEventListener("click", cyclePerm);
   $("theme-btn").addEventListener("click", cycleTheme);
   $("model-btn").addEventListener("click", openModels);
+  $("veil").addEventListener("click", () => {
+    if (!$("editor").hidden) closeEditor();
+    else toggleTree(false);
+  });
+  window.addEventListener("resize", syncChrome);
+  bindSplit($("split-tree"), "tree");
+  bindSplit($("split-ed"), "editor");
 
   $("composer").addEventListener("dragover", (e) => { e.preventDefault(); });
   $("composer").addEventListener("drop", (e) => {
     e.preventDefault();
+    const text = (e.dataTransfer.getData("text/plain") || "").trim();
     const names = [...(e.dataTransfer.files || [])].map((f) => f.name).filter(Boolean);
-    if (!names.length) return;
-    const extra = names.map((n) => "@" + n).join(" ");
-    promptEl.value = (promptEl.value ? promptEl.value.replace(/\s*$/, " ") : "") + extra + " ";
+    let extra = "";
+    if (text && text.startsWith("@")) extra = text.endsWith(" ") ? text : text + " ";
+    else if (names.length) extra = names.map((n) => "@" + n).join(" ") + " ";
+    else if (text) extra = text + " ";
+    if (!extra) return;
+    promptEl.value = (promptEl.value ? promptEl.value.replace(/\s*$/, " ") : "") + extra;
     grow();
     updatePalette();
     promptEl.focus();
@@ -662,7 +1271,10 @@
 
   applyTheme();
   setPerm(state.perm);
+  applyWrap();
+  $("ed-wrap").title = "Line wrap";
   setWorkspace(state.workspace);
+  toggleTree(state.treeOn);
   refreshStatus();
   promptEl.focus();
 })();

@@ -106,7 +106,7 @@ fxs ui
 
 Opens `http://127.0.0.1:8787`. No npm. Python 3 stdlib. `--bind-all` / `--port` if you need them. `--demo` if Docker is not up.
 
-Folder, sessions (`--resume last`), yolo/auto, theme (system / light / dark), Esc to stop. Same sandbox as `fxs`.
+Same loop as the CLI, in one page: folder, sessions (`--resume last`), yolo/auto/ask, theme, Esc to stop. Files on the left are the workspace the agent sees. Click a file to read or edit it; `@` in the composer mentions it; tool chips open the path. `⌘B` / `Ctrl+B` toggles the explorer, `⌘P` / `Ctrl+P` filters it, `⌘S` / `Ctrl+S` saves.
 
 Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 
