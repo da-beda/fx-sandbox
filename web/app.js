@@ -37,26 +37,24 @@
     more: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>',
   };
   const STEP_ICO = {
-    read: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2.5h4.2L13 6.3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3"/><path d="M9.2 2.5V6.2H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
-    write: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 12.5 11.2 4.8a1.2 1.2 0 0 1 1.7 1.7L5.2 14.2H3.5v-1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="m10.4 4.1 1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    search: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3"/><path d="m10.2 10.2 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    run: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.2" width="11" height="9.6" rx="1.6" stroke="currentColor" stroke-width="1.3"/><path d="m6 6.2 3 1.8-3 1.8V6.2Z" fill="currentColor"/></svg>',
-    web: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><path d="M3 8h10M8 3c1.6 1.8 2.4 3.6 2.4 5S9.6 11.2 8 13C6.4 11.2 5.6 9.4 5.6 8S6.4 4.8 8 3Z" stroke="currentColor" stroke-width="1.2"/></svg>',
-    retry: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><path d="M8 5.2V8l1.8 1.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    list: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.2 1.5h5.2A1.2 1.2 0 0 1 13.7 5.7v6.1A1.2 1.2 0 0 1 12.5 13H3.7A1.2 1.2 0 0 1 2.5 11.8V4.2Z" stroke="currentColor" stroke-width="1.3"/></svg>',
-    delete: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 4.5h9M6.2 4.5V3.4A.9.9 0 0 1 7.1 2.5h1.8a.9.9 0 0 1 .9.9v1.1M12.2 4.5l-.5 8.1a1 1 0 0 1-1 1H5.3a1 1 0 0 1-1-1l-.5-8.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    ok: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="m3.8 8.2 2.8 2.8 5.6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    agent: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>',
-    image: ICO.image,
-    skill: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="m8 2.5 1.5 4.1H14L10.8 9.2l1.4 4.3L8 10.8 3.8 13.5l1.4-4.3L2 6.6h4.5L8 2.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
-    status: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="1.3"/></svg>',
-    tool: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 11.5 11.5 4M6.5 4H4v2.5M9.5 12H12V9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    read: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M8.4 2.5h6.3L19.5 7.3v3.2h-2V8.6h-4.4V4.5H8.4c-.8 0-1.4.6-1.4 1.4v12.2c0 .8.6 1.4 1.4 1.4H11v2H8.4A3.4 3.4 0 0 1 5 16.1V5.9A3.4 3.4 0 0 1 8.4 2.5z"/><path fill-rule="evenodd" d="M16.4 12.2a3.6 3.6 0 1 1-2.5 6.1l-1.8 1.8 1.4 1.4 1.8-1.8a3.6 3.6 0 0 1 1.1-7.5zm0 2a1.6 1.6 0 1 0 .1 3.2 1.6 1.6 0 0 0-.1-3.2z"/></svg>',
+    write: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m5.2 16.3 9.6-9.6 2.5 2.5-9.6 9.6H5.2v-2.5zm11.3-11.3 1.3-1.3a1.4 1.4 0 0 1 2 2l-1.3 1.3-2-2z"/></svg>',
+    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.75 2.5a8.25 8.25 0 0 1 6.5 13.3l3.8 3.8-1.8 1.8-3.8-3.8A8.25 8.25 0 1 1 10.75 2.5zm0 2.5a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5z"/></svg>',
+    run: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M7.4 3.5h9.2A3.4 3.4 0 0 1 20 6.9v10.2a3.4 3.4 0 0 1-3.4 3.4H7.4A3.4 3.4 0 0 1 4 17.1V6.9A3.4 3.4 0 0 1 7.4 3.5zM6.2 6.9c0-.7.5-1.2 1.2-1.2h9.2c.7 0 1.2.5 1.2 1.2v10.2c0 .7-.5 1.2-1.2 1.2H7.4c-.7 0-1.2-.5-1.2-1.2V6.9z"/><path d="M8.2 8.1 11.7 12 8.2 15.9 6.8 14.6 9.1 12 6.8 9.4 8.2 8.1zM13 13.2h4.2v-2H13v2z"/></svg>',
+    web: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zm0 2.1c-1.7 1.9-2.7 4.1-2.8 6.4h5.6c-.1-2.3-1.1-4.5-2.8-6.4zM7.1 11c.2-2.5 1.3-4.8 3-6.6A7.4 7.4 0 0 0 5.2 11H7.1zm9.8 0h1.9A7.4 7.4 0 0 0 13.9 4.4c1.7 1.8 2.8 4.1 3 6.6zM5.2 13a7.4 7.4 0 0 0 4.9 6.6c-1.7-1.8-2.8-4.1-3-6.6H5.2zm3.9 0c.1 2.3 1.1 4.5 2.9 6.4 1.7-1.9 2.7-4.1 2.8-6.4H9.1zm6.8 0c-.2 2.5-1.3 4.8-3 6.6A7.4 7.4 0 0 0 18.8 13h-1.9z"/></svg>',
+    retry: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2a8.8 8.8 0 1 1-8.2 5.7l1.9.6A6.8 6.8 0 1 0 12 5.2V8L16 4l-4-4v3.2z"/></svg>',
+    list: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 4.2 11 6.4h6.6A2.4 2.4 0 0 1 20 8.8v8.8A2.4 2.4 0 0 1 17.6 20H6.4A2.4 2.4 0 0 1 4 17.6V6.6A2.4 2.4 0 0 1 6.4 4.2h2.8z"/></svg>',
+    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 3.5h5.6l.8 1.5h4.1v2H4.3v-2h4.1l.8-1.5zM6.2 8.2h11.6l-.9 11.2A2 2 0 0 1 14.9 21H9.1a2 2 0 0 1-2-1.6L6.2 8.2z"/></svg>',
+    ok: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.2-4-4 1.8-1.8 2.2 2.2 7.2-7.2 1.8 1.8-9 9z"/></svg>',
+    agent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8a9.2 9.2 0 1 1 0 18.4 9.2 9.2 0 0 1 0-18.4zm0 6.4a2.8 2.8 0 1 0 .1 5.6 2.8 2.8 0 0 0-.1-5.6z"/></svg>',
+    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7.6 3.5h8.8A3.1 3.1 0 0 1 19.5 6.6v10.8a3.1 3.1 0 0 1-3.1 3.1H7.6a3.1 3.1 0 0 1-3.1-3.1V6.6A3.1 3.1 0 0 1 7.6 3.5zM15 7.2a1.6 1.6 0 1 0 .1 3.2A1.6 1.6 0 0 0 15 7.2zM5.7 15.4 9.2 12l7.6 7.6c.3-.1.6-.2.8-.4L8 11.3 5.7 13.4v2z"/></svg>',
+    skill: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7.2 3.2a3.8 3.8 0 1 1 0 7.6 3.8 3.8 0 0 1 0-7.6zm9.4 1.4 2.3 4H14.3l2.3-4zM6.4 13.2h2.4a2.4 2.4 0 0 1 2.4 2.4v2.4A2.4 2.4 0 0 1 8.8 20.4H6.4A2.4 2.4 0 0 1 4 18V15.6a2.4 2.4 0 0 1 2.4-2.4zm10.4.1a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2z"/></svg>',
+    status: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8A5.4 5.4 0 0 1 17 9.6c0 1.9-1 3.4-2.4 4.4v1.7h-5.2v-1.7A5.4 5.4 0 0 1 12 2.8zM9.6 17.2h4.8v1.3H9.6V17.2zm.8 2.2h3.2V21H10.4v-1.6z"/></svg>',
+    tool: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m7.2 14.2 7.4-7.4 2.2 2.2-7.4 7.4H7.2v-2.2zm8.3-9.6 1.5-1.5a1.5 1.5 0 0 1 2.1 2.1l-1.5 1.5-2.1-2.1zM5 17.2h5.2V21H5v-3.8z"/></svg>',
+    chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 10 12 17.4 4.6 10 6 8.6l6 6 6-6 1.4 1.4z"/></svg>',
   };
-  const GROUP_NOUN = {
-    read: ["file", "files"], write: ["file", "files"], search: ["search", "searches"],
-    run: ["command", "commands"], web: ["page", "pages"], list: ["folder", "folders"],
-    delete: ["file", "files"], tool: ["tool", "tools"],
-  };
+  const LIVE_DOTS = '<span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
+  const GROUPABLE = new Set(["read", "write", "search", "web", "list", "delete", "tool", "image", "skill"]);
   const IMG_EXT = /\.(png|jpe?g|webp|gif)$/i;
   const MD_EXT = /\.(md|markdown|mdown|mdx)$/i;
 
@@ -1024,37 +1022,108 @@
     const s = Math.max(0, Math.round(ms / 1000));
     if (s < 60) return s + "s";
     const m = Math.floor(s / 60);
-    const r = s % 60;
-    return m + "m " + String(r).padStart(2, "0") + "s";
+    return m + "m " + (s % 60) + "s";
   }
 
-  function groupLabel(kind, n) {
-    const pair = GROUP_NOUN[kind] || ["step", "steps"];
-    const noun = n === 1 ? pair[0] : pair[1];
-    const verb = { read: "Read", write: "Edited", search: "Searched", run: "Ran",
-      web: "Fetched", list: "Listed", delete: "Deleted" }[kind] || "Used";
-    return verb + " " + n + " " + noun;
+  function clip(s, n) {
+    s = String(s || "").replace(/\s+/g, " ").trim();
+    return s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + "…";
   }
 
-  function paintStep(el, step) {
-    const kind = step.kind || "status";
-    const ico = STEP_ICO[kind] || (step.status === "ok" ? STEP_ICO.ok : STEP_ICO.status);
-    el.className = "step" + (step.status === "running" ? " running" : "") +
-      (step.status === "warn" ? " warn" : "") + (step.status === "ok" ? " ok" : "");
-    el.dataset.kind = kind;
-    el.dataset.status = step.status || "";
-    if (step.id) el.dataset.id = step.id;
-    if (step.path) el.dataset.path = step.path;
-    else el.removeAttribute("data-path");
-    const tag = step.path ? "button" : "div";
-    if (el.tagName.toLowerCase() !== tag) {
-      /* keep as div; button type set below */
+  function stepItems(el) {
+    try { return JSON.parse(el.dataset.items || "[]"); } catch { return []; }
+  }
+
+  function itemFrom(step) {
+    return {
+      label: step.label || "",
+      path: step.path || "",
+      detail: step.detail || "",
+      kind: step.kind || "status",
+    };
+  }
+
+  function itemCaption(it) {
+    if (it.path) {
+      const parts = String(it.path).split("/").filter(Boolean);
+      return parts[parts.length - 1] || it.path;
     }
-    if (step.path) el.setAttribute("type", "button");
-    const text = (step.label || "") +
-      (kind === "retry" && step.detail ? " · " + step.detail : "");
-    el.innerHTML = '<span class="ico" aria-hidden="true">' + ico + "</span>" +
-      '<span class="lab">' + esc(text) + "</span>";
+    return clip(String(it.detail || it.label || "").replace(
+      /^(Ran command|Running command|Ran|Read|Reading|Edited|Explored|Loaded|Viewed)\s+/i, ""), 56);
+  }
+
+  function counted(verb, n, one, many) {
+    return verb + ' <span class="num">' + n + "</span> " + (n === 1 ? one : many);
+  }
+
+  function formatLab(step, n, items) {
+    const kind = step.kind || "status";
+    const first = (items && items[0]) || {};
+    const snippet = clip(first.detail || step.detail || "", 48);
+    if (kind === "run") {
+      const cmd = snippet.replace(/^(Ran command|Running command|Ran)\s+/i, "");
+      return { verb: "Ran command", det: cmd, aria: "Ran command" + (cmd ? " " + cmd : "") };
+    }
+    if (kind === "read") return { verb: counted("Read", n, "file", "files"), aria: "Read " + n + (n === 1 ? " file" : " files") };
+    if (kind === "write") return { verb: counted("Edited", n, "file", "files"), aria: "Edited " + n + (n === 1 ? " file" : " files") };
+    if (kind === "search") return { verb: "Explored", det: n + (n === 1 ? " search" : " searches"), aria: "Explored " + n + (n === 1 ? " search" : " searches") };
+    if (kind === "web") return { verb: counted("Fetched", n, "page", "pages"), aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
+    if (kind === "list") return { verb: counted("Listed", n, "folder", "folders"), aria: "Listed " + n + (n === 1 ? " folder" : " folders") };
+    if (kind === "delete") return { verb: counted("Deleted", n, "file", "files"), aria: "Deleted " + n + (n === 1 ? " file" : " files") };
+    if (kind === "skill") return { verb: counted("Loaded", n, "skill", "skills"), aria: "Loaded " + n + (n === 1 ? " skill" : " skills") };
+    if (kind === "image") return { verb: counted("Viewed", n, "image", "images"), aria: "Viewed " + n + (n === 1 ? " image" : " images") };
+    if (kind === "tool") return { verb: counted("Used", n, "tool", "tools"), aria: "Used " + n + (n === 1 ? " tool" : " tools") };
+    let verb = esc(step.label || "");
+    if (kind === "retry" && step.detail) verb += ' <span class="num">' + esc(step.detail) + "</span>";
+    return { verb: verb || "Working", det: "", aria: step.label || "Working" };
+  }
+
+  function paintStep(el, step, items) {
+    items = items || stepItems(el);
+    if (!items.length) items = [itemFrom(step)];
+    const kind = step.kind || el.dataset.kind || "status";
+    const status = step.status != null ? step.status : (el.dataset.status || "");
+    const n = items.length;
+    const open = el.classList.contains("open");
+    el.dataset.kind = kind;
+    el.dataset.status = status;
+    el.dataset.n = String(n);
+    el.dataset.items = JSON.stringify(items);
+    if (step.id) el.dataset.id = step.id;
+    const path = n === 1 ? (step.path || items[0].path) : "";
+    if (path) el.dataset.path = path;
+    else el.removeAttribute("data-path");
+    el.className = "step"
+      + (status === "running" ? " running" : "")
+      + (status === "warn" ? " warn" : "")
+      + (status === "ok" ? " ok" : "")
+      + (n > 1 || items.some((it) => it.path || it.detail) ? " fold" : "")
+      + (open ? " open" : "");
+    const ico = STEP_ICO[kind] || (status === "ok" ? STEP_ICO.ok : STEP_ICO.status);
+    const lab = formatLab({ kind, status, label: step.label, detail: step.detail, path: step.path }, n, items);
+    const kids = items.map((it) => {
+      const cap = esc(itemCaption(it));
+      if (it.path) {
+        return '<button type="button" class="kid" data-path="' + esc(it.path) + '">' + cap + "</button>";
+      }
+      return '<div class="kid">' + cap + "</div>";
+    }).join("");
+    const exp = open ? "true" : "false";
+    const shimmer = status === "running" ? " shimmer" : "";
+    el.innerHTML =
+      '<div class="spine">' +
+        '<button type="button" class="ico-btn" aria-expanded="' + exp + '" aria-label="' + esc(lab.aria) + '">' +
+          '<span class="ico-face kind" aria-hidden="true">' + ico + "</span>" +
+          '<span class="ico-face chev" aria-hidden="true">' + STEP_ICO.chev + "</span>" +
+        "</button>" +
+      "</div>" +
+      '<button type="button" class="hit" aria-expanded="' + exp + '">' +
+        '<span class="lab">' +
+          '<span class="verb' + shimmer + '">' + lab.verb + "</span>" +
+          (lab.det ? '<span class="det">' + esc(lab.det) + "</span>" : "") +
+        "</span>" +
+      "</button>" +
+      '<div class="kids">' + kids + "</div>";
   }
 
   function startTrail() {
@@ -1064,40 +1133,59 @@
     thread.appendChild(trail);
     const live = document.createElement("div");
     live.className = "step live running";
-    live.innerHTML = '<span class="ico pulse" aria-hidden="true"></span>' +
-      '<span class="lab">Working · 0s</span>';
+    live.innerHTML = '<div class="spine">' + LIVE_DOTS + "</div>" +
+      '<span class="lab"><span class="verb">Working for</span><span class="num"> 0s</span></span>';
     trail.appendChild(live);
     const t0 = Date.now();
     const iv = setInterval(() => {
-      const lab = live.querySelector(".lab");
-      if (lab) lab.textContent = "Working · " + fmtElapsed(Date.now() - t0);
+      const num = live.querySelector(".num");
+      if (num) num.textContent = " " + fmtElapsed(Date.now() - t0);
     }, 1000);
+    function solids() {
+      return [...trail.querySelectorAll(":scope > .step:not(.live)")];
+    }
     function place(el) {
       trail.insertBefore(el, live);
     }
     return {
       el: trail,
       push(step) {
-        if (!step || !step.label) return;
+        if (!step) return;
+        if (!step.label && !step.kind) return;
         if (step.id) {
-          const existing = trail.querySelector('.step[data-id="' + step.id + '"]');
-          if (existing) { paintStep(existing, step); return; }
-        }
-        if (step.status === "ok") {
-          const rows = [...trail.querySelectorAll(".step:not(.live)")];
-          const last = rows[rows.length - 1];
-          if (last && last.dataset.kind === step.kind && last.dataset.status === "ok" && !step.id) {
-            const n = (parseInt(last.dataset.n || "1", 10) + 1);
-            last.dataset.n = String(n);
-            const lab = last.querySelector(".lab");
-            if (lab) lab.innerHTML = esc(groupLabel(step.kind, n));
-            if (step.path) last.dataset.path = step.path;
+          const existing = trail.querySelector('.step[data-id="' + CSS.escape(String(step.id)) + '"]');
+          if (existing) {
+            paintStep(existing, step, [itemFrom(step)]);
             return;
           }
         }
-        const row = document.createElement(step.path ? "button" : "div");
-        if (step.path) row.type = "button";
-        row.dataset.n = "1";
+        if (step.status === "ok" && GROUPABLE.has(step.kind || "")) {
+          const running = [...trail.querySelectorAll(":scope > .step.running:not(.live)")].reverse()
+            .find((r) => r.dataset.kind === step.kind &&
+              (!step.path || r.dataset.path === step.path ||
+                stepItems(r).some((it) => it.path === step.path)));
+          if (running) {
+            const prev = running.previousElementSibling;
+            if (prev && prev.classList.contains("step") && !prev.classList.contains("live")
+                && prev.dataset.kind === step.kind && prev.dataset.status === "ok") {
+              const items = stepItems(prev);
+              items.push(itemFrom(step));
+              paintStep(prev, { kind: step.kind, status: "ok" }, items);
+              running.remove();
+              return;
+            }
+            paintStep(running, step, [itemFrom(step)]);
+            return;
+          }
+          const last = solids().filter((r) => !r.classList.contains("running")).pop();
+          if (last && last.dataset.kind === step.kind && last.dataset.status === "ok") {
+            const items = stepItems(last);
+            items.push(itemFrom(step));
+            paintStep(last, step, items);
+            return;
+          }
+        }
+        const row = document.createElement("div");
         paintStep(row, step);
         place(row);
       },
@@ -1106,8 +1194,9 @@
         const spent = fmtElapsed(Date.now() - t0);
         if (ok === false) {
           live.className = "step live warn";
-          live.innerHTML = '<span class="ico" aria-hidden="true">' + STEP_ICO.retry + "</span>" +
-            '<span class="lab">Stopped · ' + spent + "</span>";
+          live.innerHTML = '<div class="spine"><span class="ico-face kind" aria-hidden="true">' +
+            STEP_ICO.retry + "</span></div>" +
+            '<span class="lab"><span class="verb">Stopped</span><span class="num"> · ' + spent + "</span></span>";
         } else {
           live.remove();
         }
@@ -2231,6 +2320,20 @@
   });
 
   thread.addEventListener("click", (e) => {
+    const kid = e.target.closest(".kid[data-path]");
+    if (kid) {
+      const path = kid.getAttribute("data-path");
+      if (path) openFile(path);
+      return;
+    }
+    const fold = e.target.closest(".step.fold");
+    if (fold && fold.closest(".trail")) {
+      const open = fold.classList.toggle("open");
+      fold.querySelectorAll("[aria-expanded]").forEach((b) => {
+        b.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      return;
+    }
     const t = e.target.closest("[data-path]");
     if (!t) return;
     const path = t.getAttribute("data-path");

@@ -142,6 +142,33 @@ class Sessions(unittest.TestCase):
         self.assertEqual(rows[0]["title"], "One")
 
 
+class Steps(unittest.TestCase):
+    def test_read_file_kind(self):
+        s = server.tool_step({"name": "read_file", "path": "README.md", "status": "ok"})
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "README.md")
+        self.assertEqual(s["status"], "ok")
+
+    def test_run_command_kind(self):
+        s = server.tool_step({"name": "run_command", "command": "fx status --json"})
+        self.assertEqual(s["kind"], "run")
+        self.assertIn("fx status", s["detail"])
+
+    def test_grep_kind(self):
+        s = server.tool_step({"name": "grep_files", "query": "TOOL_KIND"})
+        self.assertEqual(s["kind"], "search")
+
+    def test_bracket_read(self):
+        s = server.parse_step("[read_file] web/app.js")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "web/app.js")
+
+    def test_recovered(self):
+        s = server.parse_step("[notice] recovered on attempt 3")
+        self.assertEqual(s["label"], "Model recovered")
+        self.assertEqual(s["kind"], "ok")
+
+
 class ReleaseCopy(unittest.TestCase):
     def test_no_demo_in_ui_copy(self):
         here = Path(__file__).resolve().parent

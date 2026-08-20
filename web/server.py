@@ -33,27 +33,39 @@ BRACKET_TOOL = re.compile(r"^\[([a-z0-9_]+)\]\s*(.*)$", re.I)
 SID_OK = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 TOOL_KIND = {
     "read": ("read", "Read"),
-    "write": ("write", "Wrote"),
-    "edit": ("write", "Edited"),
+    "read_file": ("read", "Read"),
+    "read_files": ("read", "Read"),
     "open_file": ("read", "Read"),
     "file_info": ("read", "Read"),
+    "cat": ("read", "Read"),
+    "write": ("write", "Wrote"),
+    "edit": ("write", "Edited"),
     "write_file": ("write", "Wrote"),
     "edit_file": ("write", "Edited"),
-    "delete_file": ("delete", "Deleted"),
+    "str_replace": ("write", "Edited"),
+    "apply_patch": ("write", "Edited"),
     "rename_file": ("write", "Renamed"),
     "copy_file": ("write", "Copied"),
+    "delete_file": ("delete", "Deleted"),
     "create_folder": ("list", "Created"),
     "list_files": ("list", "Listed"),
+    "list_dir": ("list", "Listed"),
+    "ls": ("list", "Listed"),
+    "glob": ("search", "Found"),
     "glob_files": ("search", "Found"),
+    "grep": ("search", "Searched"),
     "grep_files": ("search", "Searched"),
+    "rg": ("search", "Searched"),
     "semantic_search": ("search", "Searched"),
+    "search": ("search", "Searched"),
     "run_command": ("run", "Ran"),
     "bash": ("run", "Ran"),
     "shell": ("run", "Ran"),
+    "exec": ("run", "Ran"),
+    "command": ("run", "Ran"),
     "web_search": ("web", "Searched"),
     "web_fetch": ("web", "Fetched"),
     "fetch": ("web", "Fetched"),
-    "search": ("search", "Searched"),
     "subagent": ("agent", "Agent"),
     "vision": ("image", "Looked"),
     "ask_user_question": ("status", "Asked"),
@@ -1094,9 +1106,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
+        q = shorten((prompt or "").splitlines()[0], 40)
+        emit(tool_step({"name": "grep_files", "query": q or "readme", "status": "ok"}))
+        time.sleep(0.05)
         if files:
             emit(tool_step({"name": "read_file", "path": files[0], "status": "ok"}))
-            time.sleep(0.08)
+            time.sleep(0.04)
+            if len(files) > 1:
+                emit(tool_step({"name": "read_file", "path": files[1], "status": "ok"}))
+                time.sleep(0.04)
+        emit(tool_step({"name": "run_command", "command": "fx status --json", "status": "ok"}))
+        time.sleep(0.04)
         readme = Path(ws) / "README.md"
         excerpt = ""
         if readme.is_file():
