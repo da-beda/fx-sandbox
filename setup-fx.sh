@@ -101,6 +101,9 @@ COMMANDS
   run  [fx-args…]      Sandboxed fx against $PWD (default for `fxs`)
   ask  [fx-args…]      One-shot: run -- fx ask …
   sessions             List fxs sessions for this directory
+  models               fx models (in the sandbox)
+  usage | credits      Local spend / AI Gateway balance
+  pr | issue           Draft a PR or GitHub issue
   build                Build the fx-sandbox Docker image
   status               What is installed, keyed, and running
   key                  (Re)prompt for a Vercel AI Gateway key
@@ -140,7 +143,7 @@ parse_args() {
         CMD="$1"
         shift
         ;;
-      sessions|session)
+      sessions|session|models|usage|credits|balance|permissions|pr|issue|workspace)
         CMD="run"
         RUN_ARGS=("$@")
         return 0

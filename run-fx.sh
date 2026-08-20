@@ -45,6 +45,7 @@ MEMORY="${FX_MEMORY:-2g}"
 CPUS="${FX_CPUS:-2}"
 PIDS="${FX_PIDS:-256}"
 ALLOW_YOLO="${FXS_YOLO:-1}"
+PERM=""
 PULL=0
 DRY=0
 STATE_ROOT="${FXS_STATE_ROOT:-${HOME}/.local/share/fx-sandbox/state}"
@@ -71,7 +72,8 @@ FLAGS
   --pids N               default 256
   --image NAME           default fx-sandbox:latest
   --allow-yolo           Yolo (default). Same as FXS_YOLO=1
-  --no-yolo              Ask before tools (fx auto/ask)
+  --no-yolo              fx auto mode (approval / auto-review)
+  --perm MODE            ask | auto | yolo
   --dry-run              Print the docker argv and exit
   -h, --help
 
@@ -184,8 +186,18 @@ while [[ $# -gt 0 ]]; do
     --pids) PIDS="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
     --pull) PULL=1; shift ;;
-    --allow-yolo) ALLOW_YOLO=1; shift ;;
-    --no-yolo|--ask) ALLOW_YOLO=0; shift ;;
+    --allow-yolo) ALLOW_YOLO=1; PERM="yolo"; shift ;;
+    --no-yolo) ALLOW_YOLO=0; PERM="auto"; shift ;;
+    --perm)
+      [[ $# -ge 2 ]] || die "--perm needs ask|auto|yolo"
+      PERM="$2"
+      case "$PERM" in
+        yolo) ALLOW_YOLO=1 ;;
+        auto|ask) ALLOW_YOLO=0 ;;
+        *) die "--perm must be ask, auto, or yolo" ;;
+      esac
+      shift 2
+      ;;
     --dry-run) DRY=1; shift ;;
     --) shift; FX_ARGS+=("$@"); break ;;
     --yolo)
@@ -280,6 +292,10 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   fi
 fi
 
+if [[ -z "$PERM" ]]; then
+  if [[ $ALLOW_YOLO -eq 1 ]]; then PERM=yolo; else PERM=auto; fi
+fi
+
 TTY_FLAGS=()
 if [[ -t 0 && -t 1 ]]; then
   TTY_FLAGS+=(-it)
@@ -312,7 +328,7 @@ DOCKER_ARGS=(
   -e "FX_HOME=/home/fx/.fx"
   -e "FX_DISABLE_KEYCHAIN=1"
   -e "FX_MODEL=${FX_MODEL:-zai/glm-5.2}"
-  -e "FX_PERMISSION_MODE=${FX_PERMISSION_MODE:-auto}"
+  -e "FX_PERMISSION_MODE=${PERM:-${FX_PERMISSION_MODE:-yolo}}"
   -e "TERM=${TERM:-xterm-256color}"
 )
 
@@ -354,6 +370,9 @@ fi
 # Interactive `fx` has no --yolo flag (only `fx ask --yolo` does).
 # Default is yolo: set FX_PERMISSION_MODE, strip a stray top-level
 # --yolo, and inject --yolo after `ask` so one-shots do not stall.
+if [[ "$PERM" == "ask" ]]; then
+  log "perm=ask — fx will prompt; isolation is still the container"
+fi
 if [[ $ALLOW_YOLO -eq 1 ]]; then
   DOCKER_ARGS+=(-e "FX_PERMISSION_MODE=yolo")
   _kept=()
