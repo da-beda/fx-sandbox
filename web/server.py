@@ -24,6 +24,37 @@ STATE_ROOT = HOME / ".local" / "share" / "fx-sandbox" / "state"
 ENV_FILE = HOME / ".config" / "fx" / "env"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 FXS_LINE = re.compile(r"^fxs:")
+NOTICE_ATT = re.compile(r"attempt\s+(\d+)\s*/\s*(\d+)", re.I)
+NOTICE_WAIT = re.compile(r"in\s+(\d+)\s*s", re.I)
+BRACKET_TOOL = re.compile(r"^\[([a-z0-9_]+)\]\s*(.*)$", re.I)
+TOOL_KIND = {
+    "read": ("read", "Read"),
+    "write": ("write", "Wrote"),
+    "edit": ("write", "Edited"),
+    "open_file": ("read", "Read"),
+    "file_info": ("read", "Read"),
+    "write_file": ("write", "Wrote"),
+    "edit_file": ("write", "Edited"),
+    "delete_file": ("delete", "Deleted"),
+    "rename_file": ("write", "Renamed"),
+    "copy_file": ("write", "Copied"),
+    "create_folder": ("list", "Created"),
+    "list_files": ("list", "Listed"),
+    "glob_files": ("search", "Found"),
+    "grep_files": ("search", "Searched"),
+    "semantic_search": ("search", "Searched"),
+    "run_command": ("run", "Ran"),
+    "bash": ("run", "Ran"),
+    "shell": ("run", "Ran"),
+    "web_search": ("web", "Searched"),
+    "web_fetch": ("web", "Fetched"),
+    "fetch": ("web", "Fetched"),
+    "search": ("search", "Searched"),
+    "subagent": ("agent", "Agent"),
+    "vision": ("image", "Looked"),
+    "ask_user_question": ("status", "Asked"),
+    "install_skill": ("skill", "Skill"),
+}
 
 DANGEROUS = {
     "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root",
@@ -69,6 +100,91 @@ def load_env_file() -> None:
 
 load_env_file()
 MODEL = os.environ.get("FX_MODEL", MODEL)
+
+
+def shorten(s: str, n: int = 72) -> str:
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def parse_step(line: str) -> dict | None:
+    line = ANSI.sub("", line or "").strip()
+    if not line or FXS_LINE.match(line):
+        return None
+    if line.startswith("[notice]"):
+        body = re.sub(r"^[⚠✓]\s*", "", line[8:].strip())
+        low = body.lower()
+        if "paused after" in low:
+            return {
+                "type": "step", "id": "retry", "kind": "retry",
+                "label": "Model unavailable", "detail": "gave up", "status": "warn",
+            }
+        if "recovered" in low or "succeeded on attempt" in low:
+            return {
+                "type": "step", "id": "retry", "kind": "ok",
+                "label": "Model recovered", "status": "ok",
+            }
+        if "retrying" in low or "unavailable" in low or "503" in body:
+            att = NOTICE_ATT.search(body)
+            wait = NOTICE_WAIT.search(body)
+            detail = f"{att.group(1)}/{att.group(2)}" if att else ""
+            if wait:
+                detail = (detail + " · " if detail else "") + wait.group(1) + "s"
+            return {
+                "type": "step", "id": "retry", "kind": "retry",
+                "label": "Waiting on the model", "detail": detail, "status": "running",
+            }
+        head = body.split("·")[0].strip()
+        return {
+            "type": "step", "kind": "status",
+            "label": shorten(head, 64), "status": "running",
+        }
+    m = BRACKET_TOOL.match(line)
+    if m:
+        raw = m.group(1).lower()
+        rest = m.group(2).strip()
+        kind, verb = TOOL_KIND.get(raw, ("tool", raw.replace("_", " ")))
+        path = rest if rest and (("/" in rest) or ("." in rest)) else ""
+        label = f"{verb} {shorten(Path(rest).name if path else rest, 48)}".strip() if rest else verb
+        return {
+            "type": "step", "kind": kind, "label": label,
+            "detail": rest, "path": path, "status": "running",
+        }
+    if len(line) > 180:
+        line = line[-120:]
+    return {"type": "step", "kind": "status", "label": shorten(line, 64), "status": "running"}
+
+
+def tool_step(tcall) -> dict:
+    if not isinstance(tcall, dict):
+        name = str(tcall).strip()
+        tcall = {"name": name}
+    name = str(tcall.get("name") or "tool").strip()
+    parts = name.split(None, 1)
+    key = parts[0].lower().replace("-", "_")
+    rest = parts[1] if len(parts) > 1 else ""
+    kind, verb = TOOL_KIND.get(key, ("tool", key.replace("_", " ")))
+    path = str(tcall.get("path") or tcall.get("file") or tcall.get("target") or "")
+    cmd = str(tcall.get("command") or tcall.get("cmd") or "")
+    query = str(tcall.get("query") or tcall.get("pattern") or "")
+    extra = path or cmd or query or rest
+    if extra and not path and ("/" in extra or "." in extra) and " " not in extra:
+        path = extra
+    label = verb
+    if extra:
+        shown = Path(extra).name if path else extra
+        label = f"{verb} {shorten(shown, 42)}".strip()
+    st = str(tcall.get("status") or "ok").lower()
+    if st in ("success", "ok", "completed", "done"):
+        st = "ok"
+    elif st in ("error", "failed", "fail"):
+        st = "warn"
+    else:
+        st = "running" if st in ("running", "in_progress", "pending") else "ok"
+    return {
+        "type": "step", "kind": kind, "label": label,
+        "detail": extra, "path": path, "status": st,
+    }
 
 
 def which(name: str) -> str | None:
@@ -651,12 +767,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
+        emit_lock = threading.Lock()
+
         def emit(obj: dict) -> None:
-            try:
-                self.wfile.write(("data: " + json.dumps(obj) + "\n\n").encode())
-                self.wfile.flush()
-            except BrokenPipeError:
-                pass
+            with emit_lock:
+                try:
+                    self.wfile.write(("data: " + json.dumps(obj) + "\n\n").encode())
+                    self.wfile.flush()
+                except BrokenPipeError:
+                    pass
 
         if local_mode():
             self._local_reply(prompt, ws, emit)
@@ -674,8 +793,8 @@ class Handler(BaseHTTPRequestHandler):
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
         if files:
-            emit({"type": "tools", "tools": [{"name": "read " + files[0]}]})
-            time.sleep(0.1)
+            emit(tool_step({"name": "read_file", "path": files[0], "status": "ok"}))
+            time.sleep(0.08)
         readme = Path(ws) / "README.md"
         excerpt = ""
         if readme.is_file():
@@ -753,10 +872,10 @@ class Handler(BaseHTTPRequestHandler):
         def pump_err() -> None:
             assert proc.stderr is not None
             for raw in iter(proc.stderr.readline, b""):
-                line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
-                if not line or FXS_LINE.match(line):
-                    continue
-                emit({"type": "activity", "text": line[-120:]})
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                step = parse_step(line)
+                if step:
+                    emit(step)
 
         t = threading.Thread(target=pump_err, daemon=True)
         t.start()
@@ -779,13 +898,8 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data, dict):
             tools = data.get("tool_calls") or []
             if tools:
-                names = []
                 for tcall in tools:
-                    if isinstance(tcall, dict):
-                        names.append({"name": str(tcall.get("name") or "tool")})
-                    else:
-                        names.append({"name": str(tcall)})
-                emit({"type": "tools", "tools": names})
+                    emit(tool_step(tcall))
             if data.get("session_id"):
                 emit({"type": "session", "id": data["session_id"]})
             if data.get("model"):
@@ -804,7 +918,8 @@ class Handler(BaseHTTPRequestHandler):
             emit({"type": "token", "text": "".join(kept)})
         if proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
-                emit({"type": "activity", "text": "stopped"})
+                emit({"type": "step", "id": "run", "kind": "status",
+                      "label": "Stopped", "status": "warn"})
             else:
                 emit({"type": "error", "text": f"exit {proc.returncode}"})
         emit({"type": "done"})
