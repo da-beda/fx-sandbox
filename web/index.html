@@ -12,38 +12,40 @@
 </head>
 <body>
   <header class="top">
-    <button type="button" id="project" class="project" title="Workspace">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M2.5 4.5h4l1 1.5h6v7.5h-11z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-      </svg>
-      <span id="project-name">project</span>
+    <button type="button" id="project" class="project" title="Folder">
+      <span id="project-name"></span>
     </button>
-    <p id="meta" class="meta"></p>
-    <button type="button" id="perm-btn" class="chip" title="Permission mode">yolo</button>
-    <button type="button" id="theme-btn" class="icon" aria-label="Theme" title="Theme">
-      <svg class="i-sun" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.3"/>
-        <path d="M8 1.6v1.4M8 13v1.4M1.6 8h1.4M13 8h1.4M3.2 3.2l1 1M11.8 11.8l1 1M3.2 12.8l1-1M11.8 4.2l1-1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-      </svg>
-      <svg class="i-moon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M13.2 10.2A5.4 5.4 0 0 1 5.8 2.8 5.5 5.5 0 1 0 13.2 10.2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-      </svg>
-    </button>
-    <button type="button" id="sessions-btn" class="icon" aria-label="Sessions" title="Sessions">
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3"/>
-        <path d="M8 5v3.2L10.2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-      </svg>
-    </button>
+    <div class="actions">
+      <button type="button" id="new-btn" class="icon" aria-label="New chat" title="New chat">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button type="button" id="more" class="icon" aria-label="Settings" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="6" cy="4.5" r="1.4" fill="currentColor"/>
+          <circle cx="10.25" cy="8" r="1.4" fill="currentColor"/>
+          <circle cx="7.25" cy="11.5" r="1.4" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
-  <main id="thread" class="thread"></main>
+  <div class="stage">
+    <div id="blank" class="blank">
+      <p>Ask this folder</p>
+    </div>
+    <main id="thread" class="thread"></main>
+  </div>
 
   <footer class="dock">
-    <p id="activity" class="activity" hidden></p>
+    <div id="palette" class="palette" hidden>
+      <ul id="palette-list" role="listbox"></ul>
+    </div>
     <form id="composer" class="composer">
-      <textarea id="prompt" rows="1" placeholder="Ask" autocomplete="off" enterkeyhint="send"></textarea>
-      <button type="submit" class="send" aria-label="Send" id="send">
+      <textarea id="prompt" rows="1" placeholder="Message" autocomplete="off" enterkeyhint="send" aria-label="Message"></textarea>
+      <button type="submit" class="send idle" aria-label="Send" id="send">
         <svg class="i-up" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 12.5V3.5M8 3.5 3.5 8M8 3.5 12.5 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -54,26 +56,52 @@
     </form>
   </footer>
 
-  <dialog id="folder-dlg" class="sheet">
-    <form method="dialog" id="folder-form">
-      <h2>Folder</h2>
-      <input id="folder-input" type="text" spellcheck="false" placeholder="/path/to/project">
-      <div class="row">
-        <button value="cancel" class="ghost">Cancel</button>
-        <button value="ok" class="solid">Open</button>
-      </div>
-    </form>
-  </dialog>
+  <dialog id="settings" class="sheet">
+    <div class="sheet-head">
+      <h2>Settings</h2>
+      <button type="button" class="icon" id="settings-close" aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
 
-  <dialog id="sessions-dlg" class="sheet">
-    <form method="dialog">
-      <h2>Sessions</h2>
-      <ul id="session-list"></ul>
-      <div class="row">
-        <button value="new" class="ghost" id="new-session">New</button>
-        <button value="close" class="solid">Done</button>
+    <section class="group">
+      <label class="cell stack">
+        <span class="cell-k">Folder</span>
+        <input id="folder-input" type="text" spellcheck="false" placeholder="/path/to/project" autocomplete="off">
+      </label>
+      <button type="button" class="cell" id="model-row">
+        <span class="cell-k">Model</span>
+        <span class="cell-v" id="model-val">GLM 5.2</span>
+      </button>
+      <ul id="model-list" class="pick" hidden></ul>
+      <div class="cell">
+        <span class="cell-k">Permissions</span>
+        <div class="seg" id="perm-seg" role="radiogroup" aria-label="Permissions">
+          <button type="button" data-perm="ask">Ask</button>
+          <button type="button" data-perm="auto">Auto</button>
+          <button type="button" data-perm="yolo">Yolo</button>
+        </div>
       </div>
-    </form>
+      <div class="cell">
+        <span class="cell-k">Appearance</span>
+        <div class="seg" id="theme-seg" role="radiogroup" aria-label="Appearance">
+          <button type="button" data-theme="system">System</button>
+          <button type="button" data-theme="light">Light</button>
+          <button type="button" data-theme="dark">Dark</button>
+        </div>
+      </div>
+      <div class="cell">
+        <span class="cell-k">Agent</span>
+        <span class="cell-v" id="agent-val"></span>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Sessions</h3>
+      <ul id="session-list"></ul>
+    </section>
   </dialog>
 
   <script src="/app.js"></script>

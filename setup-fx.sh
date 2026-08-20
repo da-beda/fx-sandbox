@@ -1730,7 +1730,7 @@ cmd_ui() {
     case "${args[$i]}" in
       --host|-H) host="${args[$((i+1))]}"; i=$((i+2)); continue ;;
       --port|-p) port="${args[$((i+1))]}"; i=$((i+2)); continue ;;
-      --demo) export FXS_UI_DEMO=1; i=$((i+1)); continue ;;
+      --offline|--local) export FXS_UI_LOCAL=1; i=$((i+1)); continue ;;
       --bind-all) host="0.0.0.0"; i=$((i+1)); continue ;;
     esac
     i=$((i+1))

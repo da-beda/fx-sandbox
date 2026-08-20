@@ -104,9 +104,11 @@ cd /path/to/one/project
 fxs ui
 ```
 
-Opens `http://127.0.0.1:8787`. No npm. Python 3 stdlib. `--bind-all` / `--port` if you need them. `--demo` if Docker is not up.
+Opens a local page. No npm. Python 3 stdlib.
 
-Folder, sessions (`--resume last`), yolo/auto, theme (system / light / dark), Esc to stop. Same sandbox as `fxs`.
+The page is the chat. Settings (folder, model, ask/auto/yolo, theme, sessions) sit behind the gear. Type `/` for commands, `@` for files. `⌘N` new chat, `⌘,` settings.
+
+`--bind-all` / `--port` if you need them. `--offline` when Docker is not up.
 
 Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 
