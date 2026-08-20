@@ -8,6 +8,9 @@
   const sessionList = $("session-list");
   const html = document.documentElement;
   const filesEl = $("files");
+  const railEl = $("rail");
+  const railList = $("rail-list");
+  const railQ = $("rail-q");
   const veil = $("veil");
   const treeEl = $("tree");
   const treeQ = $("tree-q");
@@ -20,6 +23,7 @@
     folder: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.2 1.5h5.2A1.2 1.2 0 0 1 13.7 5.7v6.1A1.2 1.2 0 0 1 12.5 13H3.7A1.2 1.2 0 0 1 2.5 11.8V4.2Z" stroke="currentColor" stroke-width="1.3"/></svg>',
     file: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2.5h4.2L13 6.3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3"/><path d="M9.2 2.5V6.2H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
     image: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.5" width="11" height="9" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="m4.5 10.5 2.2-2.4 2 2.1 1.3-1.2 1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="6.4" r="0.8" fill="currentColor"/></svg>',
+    more: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>',
   };
   const STEP_ICO = {
     read: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2.5h4.2L13 6.3V13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3"/><path d="M9.2 2.5V6.2H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
@@ -69,6 +73,8 @@
     editing: false,
     status: null,
     kind: "",
+    railOn: localStorage.getItem("fxs.railOn") === "1",
+    sessions: [],
   };
   if (localStorage.getItem("fxs.yolo") === "0" && !localStorage.getItem("fxs.perm")) {
     state.perm = "auto";
@@ -88,6 +94,10 @@
     $("ed-wrap").classList.toggle("on", state.wrap);
     edBody.setAttribute("wrap", state.wrap ? "soft" : "off");
     localStorage.setItem("fxs.wrap", state.wrap ? "1" : "0");
+  }
+
+  function hoverMorph() {
+    return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   }
 
   function basename(p) {
@@ -137,6 +147,7 @@
     document.title = basename(state.workspace) || "fxs";
     folderInput.value = state.workspace;
     if (state.filesOn) loadTree();
+    loadSessions();
   }
 
   function setPerm(p) {
@@ -168,15 +179,37 @@
     return MD_EXT.test(path || "");
   }
 
+  function resolveMdPath(url) {
+    url = String(url || "").trim();
+    let path = url.split("#")[0].split("?")[0].replace(/\\/g, "/");
+    if (!path || /^(https?:|data:|mailto:|javascript:|vbscript:)/i.test(path)) return "";
+    const rooted = path.startsWith("/");
+    path = path.replace(/^\.\//, "").replace(/^\/+/, "");
+    const dir = (state.openPath || "").replace(/\/[^/]*$/, "");
+    const joined = (!rooted && dir) ? dir + "/" + path : path;
+    const out = [];
+    for (const part of joined.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        if (!out.length) return "";
+        out.pop();
+        continue;
+      }
+      out.push(part);
+    }
+    return out.join("/");
+  }
+
   function mdUrl(url, img) {
     url = String(url || "").trim();
-    if (/^(https?:|data:|mailto:)/i.test(url)) return url;
-    const path = url.replace(/^\.\//, "").split("#")[0].split("?")[0];
+    if (/^https?:/i.test(url)) return url;
+    if (img && /^data:image\/(png|jpe?g|gif|webp)[;,]/i.test(url)) return url;
+    const path = resolveMdPath(url);
     if (img && state.workspace && path) {
       return "/api/file?raw=1&workspace=" + encodeURIComponent(state.workspace) +
         "&path=" + encodeURIComponent(path);
     }
-    return url;
+    return "";
   }
 
   function mdLink(url, inner, title) {
@@ -186,7 +219,8 @@
       return '<a href="' + esc(url) + '" target="_blank" rel="noopener"' + t + ">" + inner + "</a>";
     }
     if (url.startsWith("#")) return '<a href="' + esc(url) + '"' + t + ">" + inner + "</a>";
-    const path = url.replace(/^\.\//, "").split("#")[0].split("?")[0];
+    const path = resolveMdPath(url);
+    if (!path) return inner;
     return '<a href="#"' + t + ' data-path="' + esc(path) + '">' + inner + "</a>";
   }
 
@@ -447,9 +481,9 @@
       if (!(await maybeSave())) return;
     }
     state.filesOn = !!on;
-    localStorage.setItem("fxs.filesOn", on ? "1" : "0");
+    if (!mobile()) localStorage.setItem("fxs.filesOn", on ? "1" : "0");
     filesEl.hidden = !on;
-    veil.hidden = !(on && mobile() && !state.editing);
+    updateVeil();
     document.body.classList.toggle("files-on", on);
     $("files-btn").classList.toggle("on", on);
     $("files-btn").setAttribute("aria-expanded", on ? "true" : "false");
@@ -498,7 +532,7 @@
   function showEditor(on) {
     state.editing = !!on;
     filesEl.classList.toggle("editing", on);
-    veil.hidden = !(state.filesOn && mobile() && !on);
+    updateVeil();
     if (!on) {
       document.querySelectorAll(".tree-item.on").forEach((el) => el.classList.remove("on"));
     } else {
@@ -788,7 +822,7 @@
     { id: "settings", hint: "Folder, model, mode" },
     { id: "models", hint: "Switch model" },
     { id: "permissions", hint: "Ask, auto, yolo" },
-    { id: "resume", hint: "Sessions" },
+    { id: "resume", hint: "Past sessions" },
     { id: "debug", hint: "Diagnostics" },
     { id: "status", hint: "Runtime" },
     { id: "usage", hint: "Spend" },
@@ -1143,43 +1177,287 @@
     return Math.floor(s / 86400) + "d";
   }
 
+  function sessionBucket(ts) {
+    if (!ts) return "Older";
+    const day = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const n = day(new Date());
+    const t = day(new Date(ts * 1000));
+    const days = Math.round((n - t) / 86400000);
+    if (days <= 0) return "Today";
+    if (days === 1) return "Yesterday";
+    if (days < 7) return "This week";
+    if (days < 31) return "This month";
+    return "Older";
+  }
+
+  function fuzzyHit(q, text) {
+    q = (q || "").trim().toLowerCase();
+    if (!q) return true;
+    const t = (text || "").toLowerCase();
+    if (t.includes(q)) return true;
+    let i = 0;
+    for (const ch of t) {
+      if (ch === q[i]) i++;
+      if (i === q.length) return true;
+    }
+    return false;
+  }
+
+  function updateVeil() {
+    veil.hidden = !(mobile() && ((state.filesOn && !state.editing) || state.railOn));
+  }
+
+  const railTip = $("rail-tip");
+  const railMenu = $("rail-menu");
+  let tipTimer = 0;
+  let menuSession = null;
+
+  function hideRailTip() {
+    clearTimeout(tipTimer);
+    if (railTip) railTip.hidden = true;
+  }
+
+  function showRailTip(btn) {
+    hideRailTip();
+    if (!btn || state.railOn || mobile() || !hoverMorph() || !railTip) return;
+    const label = btn.getAttribute("data-tip");
+    if (!label) return;
+    tipTimer = setTimeout(() => {
+      const r = btn.getBoundingClientRect();
+      railTip.textContent = label;
+      railTip.hidden = false;
+      railTip.style.top = (r.top + r.height / 2) + "px";
+      railTip.style.left = (Math.round(r.right) + 12) + "px";
+    }, 180);
+  }
+
+  function hideRailMenu() {
+    if (!railMenu) return;
+    railMenu.hidden = true;
+    menuSession = null;
+    const del = railMenu.querySelector("[data-act]");
+    if (del) {
+      del.setAttribute("data-act", "delete");
+      del.textContent = "Delete";
+    }
+  }
+
+  function openRailMenu(btn, s) {
+    if (!railMenu) return;
+    if (menuSession && menuSession.id === s.id && !railMenu.hidden) {
+      hideRailMenu();
+      return;
+    }
+    menuSession = s;
+    const del = railMenu.querySelector("[data-act]");
+    if (del) {
+      del.setAttribute("data-act", "delete");
+      del.textContent = "Delete";
+    }
+    railMenu.hidden = false;
+    const r = btn.getBoundingClientRect();
+    const w = railMenu.offsetWidth || 148;
+    const h = railMenu.offsetHeight || 40;
+    let left = r.right - w;
+    let top = r.bottom + 4;
+    if (left < 8) left = 8;
+    if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+    if (top + h > window.innerHeight - 8) top = r.top - h - 4;
+    railMenu.style.left = left + "px";
+    railMenu.style.top = top + "px";
+  }
+
+  function syncChromeA11y() {
+    const brand = $("brand");
+    const welcome = document.body.classList.contains("welcome");
+    const docked = !welcome && hoverMorph();
+    if (docked) {
+      brand.setAttribute("aria-label", state.railOn ? "Close sessions" : "Sessions");
+      brand.setAttribute("aria-expanded", state.railOn ? "true" : "false");
+      brand.setAttribute("aria-controls", "rail");
+    } else {
+      brand.setAttribute("aria-label", "fxs");
+      brand.removeAttribute("aria-expanded");
+      brand.removeAttribute("aria-controls");
+    }
+    if (railEl) {
+      railEl.toggleAttribute("inert", !state.railOn);
+      railEl.setAttribute("aria-hidden", state.railOn ? "false" : "true");
+    }
+  }
+
+  function showRail(on) {
+    state.railOn = !!on;
+    if (!mobile()) localStorage.setItem("fxs.railOn", on ? "1" : "0");
+    document.body.classList.toggle("rail-on", on);
+    $("rail-toggle").setAttribute("aria-expanded", on ? "true" : "false");
+    $("sessions-btn").classList.toggle("on", on);
+    $("sessions-btn").setAttribute("aria-expanded", on ? "true" : "false");
+    hideRailTip();
+    hideRailMenu();
+    updateVeil();
+    syncChromeA11y();
+    if (on) loadSessions();
+  }
+
+  function toggleRail() {
+    showRail(!state.railOn);
+  }
+
+  function focusFind() {
+    if (mobile() && state.filesOn) showFiles(false);
+    showRail(true);
+    requestAnimationFrame(() => {
+      if (!railQ) return;
+      railQ.focus();
+      railQ.select();
+    });
+  }
+
+  function renderRailList() {
+    if (!railList) return;
+    hideRailMenu();
+    railList.innerHTML = "";
+    const q = railQ ? railQ.value : "";
+    if (!state.workspace) {
+      railList.innerHTML = "<p class='rail-empty'>Open a folder in Settings.</p>";
+      return;
+    }
+    const rows = state.sessions.filter((s) => fuzzyHit(q, s.title || s.id || ""));
+    if (!rows.length) {
+      railList.innerHTML = "<p class='rail-empty'>" + (q ? "No matches." : "Nothing yet.") + "</p>";
+      return;
+    }
+    const order = ["Today", "Yesterday", "This week", "This month", "Older"];
+    const groups = new Map(order.map((k) => [k, []]));
+    rows.forEach((s) => {
+      const k = sessionBucket(s.mtime);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(s);
+    });
+    order.forEach((k) => {
+      const items = groups.get(k) || [];
+      if (!items.length) return;
+      const wrap = document.createElement("div");
+      wrap.className = "rail-group";
+      const lab = document.createElement("span");
+      lab.className = "rail-label";
+      lab.textContent = k;
+      wrap.appendChild(lab);
+      items.forEach((s) => wrap.appendChild(sessionButton(s, q)));
+      railList.appendChild(wrap);
+    });
+  }
+
+  function sessionButton(s, q) {
+    const row = document.createElement("div");
+    row.className = "rail-item" + (s.id && s.id === state.resume ? " on" : "");
+    row.dataset.id = s.id || "";
+    const hit = document.createElement("button");
+    hit.type = "button";
+    hit.className = "rail-hit";
+    const title = s.title || "Untitled";
+    hit.innerHTML = "<span class='ttl'>" + (q ? mark(title, q) : esc(title)) + "</span>";
+    hit.title = title;
+    hit.addEventListener("click", () => openSession(s));
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "rail-more";
+    more.setAttribute("aria-label", "Session actions");
+    more.innerHTML = ICO.more;
+    more.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openRailMenu(more, s);
+    });
+    row.append(hit, more);
+    return row;
+  }
+
+  async function openSession(s) {
+    if (!s || !s.id) return;
+    hideRailMenu();
+    state.resume = s.id;
+    localStorage.setItem("fxs.resume", s.id);
+    thread.innerHTML = "";
+    openChrome();
+    renderRailList();
+    if (mobile()) showRail(false);
+    try {
+      const r = await fetch("/api/session?workspace=" + encodeURIComponent(state.workspace) +
+        "&id=" + encodeURIComponent(s.id));
+      const data = await r.json();
+      if (r.ok && Array.isArray(data.messages) && data.messages.length) {
+        thread.innerHTML = "";
+        data.messages.forEach((m) => {
+          const role = m.role === "user" ? "user" : m.role === "system" ? "sys" : "assistant";
+          const text = m.content || m.text || "";
+          if (text) addMsg(role, text);
+        });
+      }
+    } catch { /* empty thread is fine */ }
+    promptEl.focus();
+  }
+
+  async function deleteSession(s) {
+    if (!s || !s.id || !state.workspace) return;
+    hideRailMenu();
+    try {
+      await fetch("/api/session?workspace=" + encodeURIComponent(state.workspace) +
+        "&id=" + encodeURIComponent(s.id), { method: "DELETE" });
+    } catch { /* ignore */ }
+    if (state.resume === s.id) {
+      state.resume = "";
+      localStorage.removeItem("fxs.resume");
+      thread.innerHTML = "";
+      closeChrome();
+    }
+    await loadSessions();
+  }
+
   async function loadSessions() {
     sessionList.innerHTML = "";
     if (!state.workspace) {
+      state.sessions = [];
       sessionList.innerHTML = "<li class='empty-note'>Open a folder first.</li>";
+      renderRailList();
       return;
     }
     try {
       const r = await fetch("/api/sessions?workspace=" + encodeURIComponent(state.workspace));
       const data = await r.json();
-      if (!data.sessions || !data.sessions.length) {
+      state.sessions = data.sessions || [];
+      if (!state.sessions.length) {
         sessionList.innerHTML = "<li class='empty-note'>None yet.</li>";
-        return;
-      }
-      data.sessions.forEach((s) => {
-        const li = document.createElement("li");
-        const b = document.createElement("button");
-        b.type = "button";
-        b.innerHTML = esc(s.title || "Session") +
-          '<span class="id">' + esc(ago(s.mtime) + (s.id ? " · " + s.id.slice(0, 8) : "")) + "</span>";
-        b.addEventListener("click", () => {
-          state.resume = s.id || "last";
-          localStorage.setItem("fxs.resume", state.resume);
-          settings.close();
+      } else {
+        state.sessions.forEach((s) => {
+          const li = document.createElement("li");
+          const b = document.createElement("button");
+          b.type = "button";
+          b.innerHTML = esc(s.title || "Session") +
+            '<span class="id">' + esc(ago(s.mtime) + (s.id ? " · " + s.id.slice(0, 8) : "")) + "</span>";
+          b.addEventListener("click", () => {
+            openSession(s);
+            settings.close();
+          });
+          li.appendChild(b);
+          sessionList.appendChild(li);
         });
-        li.appendChild(b);
-        sessionList.appendChild(li);
-      });
+      }
     } catch {
+      state.sessions = [];
       sessionList.innerHTML = "<li class='empty-note'>Could not load sessions.</li>";
     }
+    renderRailList();
   }
 
   function newSession() {
+    hideRailMenu();
     state.resume = "";
     localStorage.removeItem("fxs.resume");
     thread.innerHTML = "";
     closeChrome();
+    renderRailList();
     promptEl.focus();
   }
 
@@ -1207,14 +1485,16 @@
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     chromeAnims.forEach((a) => { try { a.cancel(); } catch { /* ignore */ } });
     chromeAnims = [];
-    if (reduced || !brand || !dock) {
+    if (reduced || !brand || !dock || !hoverMorph()) {
       body.classList.toggle("welcome", wantWelcome);
+      syncChromeA11y();
       playMark();
       return;
     }
     const firstB = brand.getBoundingClientRect();
     const firstD = dock.getBoundingClientRect();
     body.classList.toggle("welcome", wantWelcome);
+    syncChromeA11y();
     const lastB = brand.getBoundingClientRect();
     const lastD = dock.getBoundingClientRect();
     const bx = firstB.left - lastB.left;
@@ -1311,7 +1591,8 @@
   async function runCommand(id) {
     if (id === "clear" || id === "new") { newSession(); return; }
     if (id === "files") { showFiles(true); return; }
-    if (id === "settings" || id === "resume") { openSettings(); return; }
+    if (id === "resume") { showRail(true); return; }
+    if (id === "settings") { openSettings(); return; }
     if (id === "debug" || id === "advanced") { openSettings({ advanced: true }); return; }
     if (id === "models") {
       await openSettings();
@@ -1384,7 +1665,7 @@
         body: JSON.stringify({
           prompt: text,
           workspace: state.workspace,
-          resume: state.resume || "last",
+          resume: state.resume || "",
           perm: state.perm,
         }),
       });
@@ -1422,6 +1703,7 @@
           } else if (ev.type === "session" && ev.id) {
             state.resume = ev.id;
             localStorage.setItem("fxs.resume", ev.id);
+            loadSessions();
           } else if (ev.type === "model" && ev.id) {
             state.model = ev.id;
             $("model-val").textContent = modelName(ev.id);
@@ -1521,6 +1803,7 @@
     if (e.key === "Escape") {
       if (settings.open) { settings.close(); return; }
       if (pal.open) { hidePalette(); return; }
+      if (railMenu && !railMenu.hidden) { hideRailMenu(); return; }
       if (state.editing) { closeEditor(); return; }
       if ($("explorer").classList.contains("finding")) {
         if (treeQ.value) {
@@ -1533,6 +1816,7 @@
         return;
       }
       if (state.filesOn) { showFiles(false); return; }
+      if (state.railOn) { showRail(false); return; }
       if (state.busy) stop();
       return;
     }
@@ -1554,6 +1838,16 @@
     if (mod && e.key.toLowerCase() === "b") {
       e.preventDefault();
       toggleFiles();
+    }
+    if (mod && e.key.toLowerCase() === "l") {
+      e.preventDefault();
+      toggleRail();
+    }
+    if (mod && e.key.toLowerCase() === "f") {
+      if (state.railOn) {
+        e.preventDefault();
+        focusFind();
+      }
     }
     if (mod && e.key.toLowerCase() === "s") {
       if (state.editing && state.kind === "text") {
@@ -1607,6 +1901,15 @@
 
   $("more").addEventListener("click", () => openSettings());
   $("new-btn").addEventListener("click", newSession);
+  $("rail-new").addEventListener("click", newSession);
+  $("rail-toggle").addEventListener("click", toggleRail);
+  $("sessions-btn").addEventListener("click", toggleRail);
+  $("brand").addEventListener("click", () => {
+    if (document.body.classList.contains("welcome")) return;
+    if (!hoverMorph()) return;
+    toggleRail();
+  });
+  $("rail-close").addEventListener("click", () => showRail(false));
   $("files-btn").addEventListener("click", toggleFiles);
   $("files-close").addEventListener("click", () => showFiles(false));
   $("settings-close").addEventListener("click", () => settings.close());
@@ -1614,7 +1917,74 @@
   if (copyDiag) copyDiag.addEventListener("click", () => copyText(diagnosticsText(), "copy-diag"));
   const copyChat = $("copy-chat");
   if (copyChat) copyChat.addEventListener("click", () => copyText(chatText() || "No chat yet.", "copy-chat"));
-  veil.addEventListener("click", () => showFiles(false));
+  veil.addEventListener("click", () => {
+    if (state.filesOn) showFiles(false);
+    if (state.railOn && mobile()) showRail(false);
+  });
+  $("sessions-btn").addEventListener("mouseenter", () => showRailTip($("sessions-btn")));
+  $("sessions-btn").addEventListener("mouseleave", hideRailTip);
+  $("sessions-btn").addEventListener("focus", () => showRailTip($("sessions-btn")));
+  $("sessions-btn").addEventListener("blur", hideRailTip);
+  railEl.querySelectorAll("[data-tip]").forEach((btn) => {
+    btn.addEventListener("mouseenter", () => showRailTip(btn));
+    btn.addEventListener("mouseleave", hideRailTip);
+    btn.addEventListener("focus", () => showRailTip(btn));
+    btn.addEventListener("blur", hideRailTip);
+  });
+  if (railMenu) {
+    railMenu.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]");
+      if (!act || !menuSession) return;
+      const kind = act.getAttribute("data-act");
+      if (kind === "delete") {
+        act.setAttribute("data-act", "confirm");
+        act.textContent = "Delete chat?";
+        return;
+      }
+      if (kind === "confirm") deleteSession(menuSession);
+    });
+  }
+  document.addEventListener("pointerdown", (e) => {
+    if (!railMenu || railMenu.hidden) return;
+    if (railMenu.contains(e.target) || e.target.closest(".rail-more")) return;
+    hideRailMenu();
+  });
+
+  (function edgeSwipe() {
+    let swipe = null;
+    document.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) { swipe = null; return; }
+      const t = e.touches[0];
+      const fromEdge = t.clientX <= 28;
+      if (!fromEdge && !state.railOn) return;
+      swipe = { x: t.clientX, y: t.clientY, fromEdge, rail: state.railOn };
+    }, { passive: true });
+    document.addEventListener("touchend", (e) => {
+      if (!swipe) return;
+      const s = swipe;
+      swipe = null;
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - s.x;
+      const dy = t.clientY - s.y;
+      if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.15) return;
+      if (s.fromEdge && dx > 0) showRail(true);
+      else if (s.rail && dx < 0) showRail(false);
+    }, { passive: true });
+    document.addEventListener("touchcancel", () => { swipe = null; }, { passive: true });
+  })();
+  if (railQ) {
+    railQ.addEventListener("input", renderRailList);
+    railQ.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (railQ.value) { railQ.value = ""; renderRailList(); e.stopPropagation(); }
+        else if (mobile()) showRail(false);
+      } else if (e.key === "ArrowDown") {
+        const first = railList && railList.querySelector(".rail-hit");
+        if (first) { e.preventDefault(); first.focus(); }
+      }
+    });
+  }
   $("ed-back").addEventListener("click", closeEditor);
   $("ed-save").addEventListener("click", saveFile);
   $("ed-name").addEventListener("click", async () => {
@@ -1662,9 +2032,7 @@
       edGutter.scrollTop = edBody.scrollTop;
     }).observe(edBody);
   }
-  window.addEventListener("resize", () => {
-    veil.hidden = !(state.filesOn && mobile() && !state.editing);
-  });
+  window.addEventListener("resize", updateVeil);
   edBody.addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
       e.preventDefault();
@@ -1741,15 +2109,28 @@
   filesEl.style.setProperty("--files-w", state.filesW + "px");
   grow();
   refreshStatus();
-  if (state.filesOn) showFiles(true);
+  if (mobile()) showFiles(false);
+  else if (state.filesOn) showFiles(true);
+  showRail(!mobile() && state.railOn);
   window.matchMedia("(max-width: 840px)").addEventListener("change", () => {
-    veil.hidden = !(state.filesOn && mobile() && !state.editing);
+    if (mobile()) {
+      if (state.railOn) showRail(false);
+      if (state.filesOn) showFiles(false);
+    } else {
+      if (localStorage.getItem("fxs.filesOn") === "1") showFiles(true);
+      showRail(localStorage.getItem("fxs.railOn") === "1");
+    }
+    updateVeil();
   });
   promptEl.focus();
   const brand = $("brand");
   if (brand) {
-    brand.addEventListener("pointerenter", playMark);
-    brand.addEventListener("click", playMark);
+    brand.addEventListener("pointerenter", () => {
+      if (document.body.classList.contains("welcome")) playMark();
+    });
+    brand.addEventListener("click", () => {
+      if (document.body.classList.contains("welcome")) playMark();
+    });
   }
   requestAnimationFrame(() => setTimeout(playMark, 280));
 })();

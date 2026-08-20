@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 import shutil
 import signal
 import subprocess
@@ -27,6 +28,7 @@ FXS_LINE = re.compile(r"^fxs:")
 NOTICE_ATT = re.compile(r"attempt\s+(\d+)\s*/\s*(\d+)", re.I)
 NOTICE_WAIT = re.compile(r"in\s+(\d+)\s*s", re.I)
 BRACKET_TOOL = re.compile(r"^\[([a-z0-9_]+)\]\s*(.*)$", re.I)
+SID_OK = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 TOOL_KIND = {
     "read": ("read", "Read"),
     "write": ("write", "Wrote"),
@@ -288,6 +290,30 @@ def docker_state() -> str:
         return "idle"
 
 
+def session_root(ws: str) -> Path:
+    h = hashlib.sha256(ws.encode()).hexdigest()[:16]
+    return STATE_ROOT / h / "sessions"
+
+
+def session_path(ws: str, sid: str) -> Path | None:
+    if not SID_OK.match(sid or ""):
+        return None
+    root = session_root(ws)
+    if not root.is_dir():
+        return None
+    try:
+        root_r = root.resolve()
+    except OSError:
+        return None
+    for p in (root / f"{sid}.json", root / sid):
+        try:
+            if p.is_file() and p.resolve().parent == root_r:
+                return p
+        except OSError:
+            continue
+    return None
+
+
 def session_title(path: Path) -> str:
     try:
         raw = path.read_text(encoding="utf-8", errors="replace")[:12000]
@@ -310,11 +336,7 @@ def session_title(path: Path) -> str:
 
 
 def list_sessions(ws: str) -> list[dict]:
-    import hashlib
-
-    h = hashlib.sha256(ws.encode()).hexdigest()[:16]
-    d = STATE_ROOT / h
-    sessions = d / "sessions"
+    sessions = session_root(ws)
     if not sessions.is_dir():
         return []
     out = []
@@ -328,6 +350,62 @@ def list_sessions(ws: str) -> list[dict]:
             "mtime": int(p.stat().st_mtime),
         })
     return out[:40]
+
+
+def _message_text(m: dict) -> str:
+    content = m.get("content") or m.get("text") or ""
+    if isinstance(content, list):
+        parts = []
+        for x in content:
+            if isinstance(x, dict):
+                parts.append(str(x.get("text") or ""))
+            elif isinstance(x, str):
+                parts.append(x)
+        content = "".join(parts)
+    if not isinstance(content, str):
+        content = str(content)
+    return content.strip()
+
+
+def read_session(ws: str, sid: str) -> dict | None:
+    p = session_path(ws, sid)
+    if not p:
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8", errors="replace")[:200_000])
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    msgs = []
+    raw = data.get("messages") or data.get("turns") or []
+    if isinstance(raw, list):
+        for m in raw[:80]:
+            if not isinstance(m, dict):
+                continue
+            role = str(m.get("role") or "assistant")
+            if role not in ("user", "assistant", "system", "tool"):
+                role = "assistant"
+            text = _message_text(m)
+            if text:
+                msgs.append({"role": role, "content": text[:8000]})
+    return {
+        "id": sid,
+        "title": session_title(p),
+        "mtime": int(p.stat().st_mtime),
+        "messages": msgs,
+    }
+
+
+def delete_session(ws: str, sid: str) -> bool:
+    p = session_path(ws, sid)
+    if not p:
+        return False
+    try:
+        p.unlink()
+    except OSError:
+        return False
+    return True
 
 
 def fuzzy_score(query: str, text: str) -> int:
@@ -693,6 +771,20 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._json(400, {"error": str(e), "sessions": []})
             return
+        if u.path == "/api/session":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [""])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            sid = (qs.get("id") or [""])[0]
+            data = read_session(ws, sid)
+            if not data:
+                self._json(404, {"error": "not found"})
+                return
+            self._json(200, data)
+            return
         if u.path == "/api/models":
             self._models()
             return
@@ -798,6 +890,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, write_workspace_file(ws, rel, str(payload.get("text") or "")))
             except (ValueError, OSError) as e:
                 self._json(400, {"error": str(e)})
+            return
+        self._json(404, {"error": "not found"})
+
+    def do_DELETE(self) -> None:
+        u = urlparse(self.path)
+        if u.path == "/api/session":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [""])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            sid = (qs.get("id") or [""])[0]
+            if delete_session(ws, sid):
+                self._json(200, {"ok": True})
+            else:
+                self._json(404, {"error": "not found"})
             return
         self._json(404, {"error": "not found"})
 
@@ -940,13 +1049,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
         perm = clean_perm(perm)
-        fx_args = ["ask", "--json"]
+        base = ["ask", "--json"]
         if perm == "yolo":
-            fx_args.append("--yolo")
+            base.append("--yolo")
+        resume_flag: list[str] = []
         if resume and resume != "last":
-            fx_args += ["--resume", resume]
-        elif resume == "last" and list_sessions(ws):
-            fx_args += ["--resume", "last"]
+            resume_flag = ["--resume", str(resume)[:80]]
+        elif resume == "last" and sandbox_ok() and list_sessions(ws):
+            resume_flag = ["--resume", "last"]
+        img_flags: list[str] = []
         for img in images[:4]:
             p = str(img)
             if not p or ".." in p:
@@ -956,65 +1067,85 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             abs_img = p if os.path.isabs(p) else os.path.join(ws, p)
             if os.path.isfile(abs_img):
-                fx_args += ["--image", abs_img]
-        fx_args += ["--", prompt]
-        try:
-            cmd = agent_argv(ws, fx_args, perm)
-        except FileNotFoundError as e:
-            emit({"type": "error", "text": str(e)})
-            emit({"type": "done"})
-            return
-        env = os.environ.copy()
-        env["FX_MODEL"] = MODEL
-        env["FX_PERMISSION_MODE"] = perm
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=ws,
-                env=env,
-                start_new_session=True,
-            )
-        except OSError as e:
-            emit({"type": "error", "text": str(e)})
-            emit({"type": "done"})
-            return
-        with PROC_LOCK:
-            CURRENT["proc"] = proc
+                img_flags += ["--image", abs_img]
 
-        err_chunks: list[str] = []
-
-        def pump_err() -> None:
-            assert proc.stderr is not None
-            for raw in iter(proc.stderr.readline, b""):
-                line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
-                if not line or FXS_LINE.match(line):
-                    continue
-                err_chunks.append(line)
-                step = parse_step(line)
-                if step:
-                    emit(step)
-
-
-        t = threading.Thread(target=pump_err, daemon=True)
-        t.start()
-        chunks: list[str] = []
-        assert proc.stdout is not None
+        raw_out = ""
+        err_text = ""
+        proc = None
+        pending_steps: list[dict] = []
+        attempt_resume = bool(resume_flag)
         while True:
-            chunk = proc.stdout.read(256)
-            if not chunk:
-                break
-            piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
-            if piece:
-                chunks.append(piece)
-        proc.wait()
-        t.join(timeout=1)
-        with PROC_LOCK:
-            if CURRENT.get("proc") is proc:
-                CURRENT["proc"] = None
-        raw_out = "".join(chunks)
-        err_text = "\n".join(err_chunks)
+            fx_args = base + resume_flag + img_flags + ["--", prompt]
+            try:
+                cmd = agent_argv(ws, fx_args, perm)
+            except FileNotFoundError as e:
+                emit({"type": "error", "text": str(e)})
+                emit({"type": "done"})
+                return
+            env = os.environ.copy()
+            env["FX_MODEL"] = MODEL
+            env["FX_PERMISSION_MODE"] = perm
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=ws,
+                    env=env,
+                    start_new_session=True,
+                )
+            except OSError as e:
+                emit({"type": "error", "text": str(e)})
+                emit({"type": "done"})
+                return
+            with PROC_LOCK:
+                CURRENT["proc"] = proc
+
+            err_chunks: list[str] = []
+            pending_steps = []
+
+            def pump_err() -> None:
+                assert proc.stderr is not None
+                for raw in iter(proc.stderr.readline, b""):
+                    line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
+                    if not line or FXS_LINE.match(line):
+                        continue
+                    err_chunks.append(line)
+                    step = parse_step(line)
+                    if not step:
+                        continue
+                    if resume_flag:
+                        pending_steps.append(step)
+                    else:
+                        emit(step)
+
+            t = threading.Thread(target=pump_err, daemon=True)
+            t.start()
+            chunks: list[str] = []
+            assert proc.stdout is not None
+            while True:
+                chunk = proc.stdout.read(256)
+                if not chunk:
+                    break
+                piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
+                if piece:
+                    chunks.append(piece)
+            proc.wait()
+            t.join(timeout=1)
+            with PROC_LOCK:
+                if CURRENT.get("proc") is proc:
+                    CURRENT["proc"] = None
+            raw_out = "".join(chunks)
+            err_text = "\n".join(err_chunks)
+            blob = raw_out + "\n" + err_text
+            if attempt_resume and "NoSavedSessions" in blob:
+                resume_flag = []
+                attempt_resume = False
+                continue
+            break
+
+        for step in pending_steps:
+            emit(step)
         data = extract_json(raw_out) or extract_json(err_text)
         emitted = False
         if isinstance(data, dict):
@@ -1044,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
             if text:
                 emit({"type": "token", "text": "".join(kept)})
                 emitted = True
-        if proc.returncode not in (0, None):
+        if proc is not None and proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
                 emit({"type": "step", "id": "run", "kind": "status",
                       "label": "Stopped", "status": "warn"})
