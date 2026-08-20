@@ -722,7 +722,8 @@
       push(step) {
         if (!step || !step.label) return;
         if (step.id) {
-          const existing = trail.querySelector('.step[data-id="' + step.id + '"]');
+          const id = (window.CSS && CSS.escape) ? CSS.escape(step.id) : String(step.id).replace(/"/g, "");
+          const existing = trail.querySelector('.step[data-id="' + id + '"]');
           if (existing) { paintStep(existing, step); return; }
         }
         if (step.status === "ok") {

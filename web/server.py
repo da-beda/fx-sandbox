@@ -63,7 +63,7 @@ DANGEROUS = {
 }
 
 PROC_LOCK = threading.Lock()
-CURRENT: dict = {"proc": None}
+CURRENT: dict = {"proc": None, "acp": None, "sid": None, "ws": None}
 
 SKIP_DIRS = {
     ".git", "node_modules", ".venv", "dist", "target", "__pycache__",
@@ -286,21 +286,72 @@ def session_title(path: Path) -> str:
 def list_sessions(ws: str) -> list[dict]:
     import hashlib
 
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(item: dict) -> None:
+        sid = str(item.get("id") or "")
+        if not sid or sid in seen:
+            return
+        seen.add(sid)
+        out.append(item)
+
+    try:
+        ws_res = str(Path(ws).resolve()) if ws else ""
+    except Exception:
+        ws_res = ws or ""
+
+    fx_root = HOME / ".fx" / "sessions"
+    if fx_root.is_dir():
+        rows = []
+        for p in fx_root.iterdir():
+            if not p.is_dir() or p.name.startswith(".") or p.name == "index.pending":
+                continue
+            meta: dict = {}
+            for name in ("session.json", "display.json"):
+                fp = p / name
+                if not fp.is_file():
+                    continue
+                try:
+                    data = json.loads(fp.read_text(encoding="utf-8", errors="replace")[:20000])
+                except Exception:
+                    continue
+                if isinstance(data, dict):
+                    meta.update(data)
+            origin = str(meta.get("workspace_root") or meta.get("origin_workspace_root") or "")
+            if ws_res and origin:
+                try:
+                    if str(Path(origin).resolve()) != ws_res:
+                        continue
+                except Exception:
+                    if origin not in (ws, ws_res):
+                        continue
+            title = str(meta.get("title") or meta.get("preview") or "").strip()
+            mtime = int(meta.get("updated_at_ms") or 0)
+            if mtime > 10_000_000_000:
+                mtime //= 1000
+            if not mtime:
+                try:
+                    mtime = int(p.stat().st_mtime)
+                except OSError:
+                    mtime = 0
+            rows.append({"id": p.name, "title": (title[:72] if title else p.name[:24]), "mtime": mtime})
+        rows.sort(key=lambda x: -x["mtime"])
+        for row in rows:
+            add(row)
+
     h = hashlib.sha256(ws.encode()).hexdigest()[:16]
-    d = STATE_ROOT / h
-    sessions = d / "sessions"
-    if not sessions.is_dir():
-        return []
-    out = []
-    for p in sorted(sessions.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if p.name.startswith("."):
-            continue
-        sid = p.stem if p.suffix else p.name
-        out.append({
-            "id": sid,
-            "title": session_title(p) if p.is_file() else sid[:24],
-            "mtime": int(p.stat().st_mtime),
-        })
+    sessions = STATE_ROOT / h / "sessions"
+    if sessions.is_dir():
+        for p in sorted(sessions.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.name.startswith("."):
+                continue
+            sid = p.stem if p.suffix else p.name
+            add({
+                "id": sid,
+                "title": session_title(p) if p.is_file() else sid[:24],
+                "mtime": int(p.stat().st_mtime),
+            })
     return out[:40]
 
 
@@ -528,7 +579,424 @@ def parse_models(text: str) -> list[dict]:
     return out
 
 
+ACP_KIND = {
+    "read": "read", "edit": "write", "delete": "delete", "move": "write",
+    "search": "search", "execute": "run", "think": "status",
+    "fetch": "web", "other": "tool",
+}
+STEP_ID_OK = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def step_id(raw) -> str:
+    return STEP_ID_OK.sub("", str(raw or ""))[:80]
+
+
+class AcpClient:
+    """JSON-RPC 2.0 ACP client over fx acp stdio."""
+
+    def __init__(self, fx: str, cwd: str, model: str, env: dict) -> None:
+        self.cwd = cwd
+        self.model = model
+        self._id = 0
+        self._pending: dict[int, dict] = {}
+        self._lock = threading.Lock()
+        self._turn = threading.Lock()
+        self._alive = True
+        self.perm = "yolo"
+        self.on_update = None
+        log = STATE_ROOT / "acp.log"
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            log = Path("/tmp/fx-acp.log")
+        self.proc = subprocess.Popen(
+            [fx, "acp", "--model", model, "--log-file", str(log)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,
+            bufsize=0,
+        )
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+        self._err = threading.Thread(target=self._read_err, daemon=True)
+        self._err.start()
+
+    def alive(self) -> bool:
+        return self._alive and self.proc.poll() is None
+
+    def close(self) -> None:
+        self._alive = False
+        with self._lock:
+            waiting = list(self._pending.values())
+            self._pending.clear()
+        for slot in waiting:
+            slot["error"] = {"message": "closed"}
+            slot["event"].set()
+        try:
+            if self.proc.poll() is None:
+                os.killpg(self.proc.pid, signal.SIGTERM)
+        except Exception:
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
+
+    def _send(self, obj: dict) -> None:
+        line = json.dumps(obj, ensure_ascii=False) + "\n"
+        with self._lock:
+            assert self.proc.stdin is not None
+            self.proc.stdin.write(line.encode("utf-8"))
+            self.proc.stdin.flush()
+
+    def notify(self, method: str, params) -> None:
+        self._send({"jsonrpc": "2.0", "method": method, "params": params})
+
+    def request(self, method: str, params, timeout: float = 30) -> dict:
+        ev = threading.Event()
+        slot: dict = {"event": ev, "result": None, "error": None}
+        with self._lock:
+            self._id += 1
+            rid = self._id
+            self._pending[rid] = slot
+            assert self.proc.stdin is not None
+            line = json.dumps(
+                {"jsonrpc": "2.0", "id": rid, "method": method, "params": params},
+                ensure_ascii=False,
+            ) + "\n"
+            self.proc.stdin.write(line.encode("utf-8"))
+            self.proc.stdin.flush()
+        if not ev.wait(timeout):
+            with self._lock:
+                self._pending.pop(rid, None)
+            raise TimeoutError(method + " timed out")
+        if slot["error"]:
+            err = slot["error"]
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            raise RuntimeError(msg or method)
+        return slot["result"] if isinstance(slot["result"], dict) else {}
+
+    def _reply(self, rid, result=None, error=None) -> None:
+        msg: dict = {"jsonrpc": "2.0", "id": rid}
+        if error is not None:
+            msg["error"] = error
+        else:
+            msg["result"] = result if result is not None else {}
+        self._send(msg)
+
+    def _read(self) -> None:
+        assert self.proc.stdout is not None
+        for raw in iter(self.proc.stdout.readline, b""):
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(msg, dict):
+                continue
+            rid = msg.get("id")
+            method = msg.get("method")
+            if method and rid is not None:
+                self._agent_request(rid, method, msg.get("params") or {})
+                continue
+            if rid is not None:
+                with self._lock:
+                    slot = self._pending.pop(rid, None)
+                if not slot:
+                    continue
+                slot["result"] = msg.get("result")
+                slot["error"] = msg.get("error")
+                slot["event"].set()
+                continue
+            if method == "session/update":
+                cb = self.on_update
+                if cb:
+                    try:
+                        cb(msg.get("params") or {})
+                    except Exception:
+                        pass
+        self._alive = False
+
+    def _read_err(self) -> None:
+        assert self.proc.stderr is not None
+        for raw in iter(self.proc.stderr.readline, b""):
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            step = parse_step(line)
+            cb = self.on_update
+            if step and cb:
+                try:
+                    cb({"update": {"sessionUpdate": "stderr_step", "step": step}})
+                except Exception:
+                    pass
+
+    def _agent_request(self, rid, method: str, params: dict) -> None:
+        if method == "session/request_permission":
+            opts = params.get("options") or []
+            prefer = "allow_always" if self.perm == "yolo" else "allow_once"
+            pick = next((o for o in opts if o.get("kind") == prefer), None)
+            if not pick:
+                pick = next((o for o in opts if str(o.get("kind", "")).startswith("allow")), None)
+            if not pick and opts:
+                pick = opts[0]
+            if pick:
+                self._reply(rid, {"outcome": {"outcome": "selected", "optionId": pick.get("optionId")}})
+            else:
+                self._reply(rid, {"outcome": {"outcome": "selected", "optionId": "allow-once"}})
+            return
+        self._reply(rid, error={"code": -32601, "message": "method not found"})
+
+    def initialize(self) -> dict:
+        # Do not advertise fs/terminal — fx then uses its own tools, which
+        # show up as tool_call updates in the activity trail.
+        return self.request("initialize", {
+            "protocolVersion": 1,
+            "clientInfo": {"name": "fxs-ui", "title": "fxs", "version": "1"},
+            "clientCapabilities": {},
+        }, timeout=20)
+
+    def new_session(self) -> dict:
+        return self.request("session/new", {
+            "cwd": self.cwd, "mcpServers": [],
+        }, timeout=30)
+
+    def resume_session(self, sid: str) -> dict:
+        return self.request("session/resume", {
+            "sessionId": sid, "cwd": self.cwd, "mcpServers": [],
+        }, timeout=20)
+
+    def load_session(self, sid: str) -> dict:
+        return self.request("session/load", {
+            "sessionId": sid, "cwd": self.cwd, "mcpServers": [],
+        }, timeout=30)
+
+    def set_mode(self, sid: str, perm: str) -> None:
+        mode = "ask" if perm == "ask" else "code"
+        try:
+            self.request("session/set_mode", {"sessionId": sid, "modeId": mode}, timeout=10)
+        except Exception:
+            try:
+                self.request("session/set_config_option", {
+                    "sessionId": sid, "configId": "mode", "value": mode,
+                }, timeout=10)
+            except Exception:
+                pass
+
+    def prompt(self, sid: str, text: str, timeout: float = 600) -> dict:
+        with self._turn:
+            return self.request("session/prompt", {
+                "sessionId": sid,
+                "prompt": [{"type": "text", "text": text}],
+            }, timeout=timeout)
+
+    def cancel(self, sid: str) -> None:
+        try:
+            self.notify("session/cancel", {"sessionId": sid})
+        except Exception:
+            pass
+
+
+def acp_rel(ws: str, path: str) -> str:
+    if not path:
+        return ""
+    try:
+        return str(Path(path).resolve().relative_to(Path(ws).resolve()))
+    except Exception:
+        return path
+
+
+def acp_step_from_tool(update: dict, ws: str, prev: dict | None = None) -> dict:
+    raw_kind = str(update.get("kind") or "")
+    if raw_kind:
+        kind = ACP_KIND.get(raw_kind, "tool")
+    elif prev and prev.get("kind"):
+        kind = str(prev.get("kind") or "tool")
+    else:
+        kind = "tool"
+    title = str(update.get("title") or "")
+    if not title and prev:
+        title = str(prev.get("label") or "")
+    if not title:
+        title = kind
+    st = str(update.get("status") or "in_progress").lower()
+    if st in ("completed", "success", "ok"):
+        status = "ok"
+    elif st in ("failed", "error", "cancelled"):
+        status = "warn"
+    else:
+        status = "running"
+    path = ""
+    locs = update.get("locations") or []
+    if isinstance(locs, list) and locs:
+        loc0 = locs[0] if isinstance(locs[0], dict) else {}
+        path = acp_rel(ws, str(loc0.get("path") or ""))
+    raw = update.get("rawInput") if isinstance(update.get("rawInput"), dict) else {}
+    if not path:
+        path = acp_rel(ws, str(raw.get("path") or raw.get("file") or raw.get("target") or ""))
+    if not path and prev:
+        path = str(prev.get("path") or "")
+    cmd = str(raw.get("command") or raw.get("cmd") or "")
+    label = shorten(title, 64)
+    if path and Path(path).name not in label:
+        label = f"{label} {Path(path).name}".strip()
+    elif cmd and cmd not in label:
+        label = f"{label} {shorten(cmd, 40)}".strip()
+    tid = step_id(update.get("toolCallId") or (prev or {}).get("id") or "")
+    return {
+        "type": "step", "id": tid or None, "kind": kind,
+        "label": label, "path": path, "status": status,
+    }
+
+
+def acp_info_step(update: dict) -> dict | None:
+    meta = update.get("_meta") if isinstance(update.get("_meta"), dict) else {}
+    fxm = meta.get("fx") if isinstance(meta.get("fx"), dict) else {}
+    rec = None
+    for cand in (fxm.get("modelResponseRecovery"), update.get("modelResponseRecovery"), fxm):
+        if isinstance(cand, dict) and cand:
+            rec = cand
+            break
+    blob = ""
+    try:
+        blob = json.dumps(update, ensure_ascii=False)
+    except Exception:
+        blob = str(update)
+    low = blob.lower()
+    recovered = "recovered" in low or "succeeded on attempt" in low
+    retrying = (
+        "retry" in low or "unavailable" in low or "503" in blob
+        or "paused after" in low or "modelresponserecovery" in low
+    )
+    if isinstance(rec, dict):
+        cause = str(rec.get("cause") or rec.get("action") or rec.get("outcome") or "")
+        if "recover" in cause.lower() or rec.get("recovered") or rec.get("succeeded"):
+            recovered = True
+        if rec.get("action") == "retry_request" or "retry" in cause.lower() or "unavailable" in cause.lower():
+            retrying = True
+    if not recovered and not retrying:
+        return None
+    att = total = wait = None
+    if isinstance(rec, dict):
+        att = rec.get("attempt") or rec.get("attempts") or rec.get("providerAttempts") or rec.get("try")
+        total = rec.get("limit") or rec.get("max") or rec.get("maxAttempts") or rec.get("total")
+        wait = rec.get("waitMs") or rec.get("delayMs") or rec.get("retryInMs") or rec.get("in")
+        if isinstance(att, str) and "/" in att:
+            a, _, b = att.partition("/")
+            att, total = a, total or b
+    detail = ""
+    if att and total:
+        detail = f"{att}/{total}"
+    elif att:
+        detail = str(att)
+    if wait not in (None, ""):
+        try:
+            w = float(wait)
+            if w > 50:
+                w = w / 1000.0
+            detail = (detail + " · " if detail else "") + (str(int(w)) + "s")
+        except Exception:
+            pass
+    if recovered:
+        return {
+            "type": "step", "id": "retry", "kind": "ok",
+            "label": "Model recovered", "status": "ok",
+        }
+    if "paused after" in low or "gave up" in low:
+        return {
+            "type": "step", "id": "retry", "kind": "retry",
+            "label": "Model unavailable", "detail": "gave up", "status": "warn",
+        }
+    return {
+        "type": "step", "id": "retry", "kind": "retry",
+        "label": "Waiting on the model", "detail": detail, "status": "running",
+    }
+
+
+def acp_chunk_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        t = content.get("text")
+        return t if isinstance(t, str) else ""
+    if isinstance(content, list):
+        return "".join(acp_chunk_text(x) for x in content)
+    return ""
+
+
+def ensure_acp(ws: str, model: str, perm: str) -> AcpClient:
+    with PROC_LOCK:
+        acp = CURRENT.get("acp")
+        if acp and acp.alive() and CURRENT.get("ws") == ws and acp.model == model:
+            acp.perm = perm
+            return acp
+        if acp:
+            acp.close()
+            CURRENT["acp"] = None
+            CURRENT["proc"] = None
+            CURRENT["sid"] = None
+        fx = fx_bin()
+        if not fx:
+            raise FileNotFoundError("fx is not on PATH")
+        env = os.environ.copy()
+        env["FX_MODEL"] = model
+        env["FX_PERMISSION_MODE"] = perm
+        env.setdefault("FX_DISABLE_KEYCHAIN", "1")
+        acp = AcpClient(fx, ws, model, env)
+        CURRENT["acp"] = acp
+        CURRENT["proc"] = acp.proc
+        CURRENT["ws"] = ws
+        CURRENT["sid"] = None
+    acp.perm = perm
+    try:
+        acp.initialize()
+    except Exception:
+        acp.close()
+        with PROC_LOCK:
+            if CURRENT.get("acp") is acp:
+                CURRENT["acp"] = None
+                CURRENT["proc"] = None
+        raise
+    return acp
+
+
+def acp_open_session(acp: AcpClient, resume: str, replay_gate: dict) -> str:
+    resume = (resume or "").strip()
+    if resume == "last":
+        cur = CURRENT.get("sid")
+        resume = str(cur) if cur else ""
+    if resume and CURRENT.get("sid") == resume and acp.alive():
+        return resume
+    if resume:
+        try:
+            res = acp.resume_session(resume)
+            sid = str((res or {}).get("sessionId") or resume)
+            return sid
+        except Exception:
+            try:
+                replay_gate["on"] = True
+                acp.load_session(resume)
+                return resume
+            except Exception:
+                pass
+            finally:
+                replay_gate["on"] = False
+    res = acp.new_session()
+    sid = str((res or {}).get("sessionId") or "")
+    if not sid:
+        raise RuntimeError("fx acp did not return a session")
+    return sid
+
+
 def kill_current() -> None:
+    with PROC_LOCK:
+        acp = CURRENT.get("acp")
+        sid = CURRENT.get("sid")
+    if acp and sid:
+        acp.cancel(sid)
+        return
     with PROC_LOCK:
         proc = CURRENT.get("proc")
         CURRENT["proc"] = None
@@ -781,14 +1249,11 @@ class Handler(BaseHTTPRequestHandler):
             self._local_reply(prompt, ws, emit)
             return
         perm = clean_perm(payload.get("perm") or ("yolo" if payload.get("yolo", True) else "auto"))
-        self._run_fxs(
-            prompt,
-            ws,
-            str(payload.get("resume") or ""),
-            perm,
-            payload.get("images") if isinstance(payload.get("images"), list) else [],
-            emit,
-        )
+        images = payload.get("images") if isinstance(payload.get("images"), list) else []
+        resume = str(payload.get("resume") or "")
+        if not self._run_acp(prompt, ws, resume, perm, images, emit):
+            self._run_fxs(prompt, ws, resume, perm, images, emit)
+
 
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
@@ -816,7 +1281,75 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(0.008)
         emit({"type": "done"})
 
+    def _run_acp(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> bool:
+        if images or not fx_bin():
+            return False
+        try:
+            acp = ensure_acp(ws, MODEL, perm)
+        except Exception:
+            return False
+
+        replay = {"on": False}
+        tools: dict[str, dict] = {}
+
+        def on_update(params) -> None:
+            if not isinstance(params, dict):
+                return
+            update = params.get("update") if isinstance(params.get("update"), dict) else {}
+            kind = str(update.get("sessionUpdate") or update.get("type") or "")
+            if kind == "stderr_step":
+                step = update.get("step")
+                if isinstance(step, dict):
+                    emit(step)
+                return
+            if kind in ("agent_message_chunk", "agent_thought_chunk"):
+                if replay["on"] or kind == "agent_thought_chunk":
+                    return
+                text = acp_chunk_text(update.get("content"))
+                if text:
+                    emit({"type": "token", "text": text})
+                return
+            if kind in ("tool_call", "tool_call_update"):
+                tid = step_id(update.get("toolCallId") or "")
+                step = acp_step_from_tool(update, ws, tools.get(tid))
+                if tid:
+                    tools[tid] = step
+                emit(step)
+                return
+            if kind in ("session_info_update", "session_info"):
+                step = acp_info_step(update)
+                if step:
+                    emit(step)
+
+        acp.on_update = on_update
+        sid = ""
+        try:
+            sid = acp_open_session(acp, resume, replay)
+            with PROC_LOCK:
+                CURRENT["sid"] = sid
+            emit({"type": "session", "id": sid})
+            acp.set_mode(sid, perm)
+            result = acp.prompt(sid, prompt, timeout=600)
+            stop = str((result or {}).get("stopReason") or "")
+            if stop == "cancelled":
+                emit({"type": "step", "id": "run", "kind": "status",
+                      "label": "Stopped", "status": "warn"})
+            elif stop and stop not in ("end_turn", "max_tokens"):
+                emit({"type": "step", "id": "run", "kind": "status",
+                      "label": stop.replace("_", " "), "status": "warn"})
+        except TimeoutError:
+            if sid:
+                acp.cancel(sid)
+            emit({"type": "error", "text": "timed out"})
+        except Exception as e:
+            emit({"type": "error", "text": str(e)})
+        finally:
+            acp.on_update = None
+            emit({"type": "done"})
+        return True
+
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
+
         kind, bin_ = agent()
         if not bin_:
             emit({"type": "error", "text": "fx is not on PATH"})
