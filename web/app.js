@@ -1999,9 +1999,15 @@
   function paintPplxRow(p) {
     const hint = $("pplx-hint");
     if (!hint) return;
-    hint.textContent = (p && p.perplexity)
-      ? "Search key is saved. Paste a new one to replace."
-      : "Perplexity Search API key. The agent uses it for web search. Kept on this machine.";
+    if (p && p.perplexity) {
+      hint.textContent = "Perplexity key is saved. Search uses it even on OpenRouter. Paste a new one to replace.";
+    } else if (p && p.vercel) {
+      hint.textContent = "On Vercel, web search already uses AI Gateway. Optional pplx- key is used if you switch providers.";
+    } else if (p && p.gateway_search) {
+      hint.textContent = "Search falls back to your Vercel AI Gateway key. Paste pplx- to use Perplexity directly.";
+    } else {
+      hint.textContent = "pplx- or vck_ key. Used when the chat provider is not Vercel. Kept on this machine.";
+    }
   }
 
   async function savePplxKey(key) {

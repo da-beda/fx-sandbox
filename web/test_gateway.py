@@ -593,6 +593,12 @@ class HTTP(unittest.TestCase):
 
     def test_language_model_executes_search_and_continues(self):
         prev = os.environ.pop("PERPLEXITY_API_KEY", None)
+        prev_vck = os.environ.pop("VERCEL_AI_GATEWAY_API_KEY", None)
+        prev_gw = os.environ.get("AI_GATEWAY_API_KEY")
+        if (prev_gw or "").startswith("vck_"):
+            os.environ.pop("AI_GATEWAY_API_KEY", None)
+        else:
+            prev_gw = None
         posts: list[dict] = []
 
         class SearchUp(BaseHTTPRequestHandler):
@@ -677,6 +683,12 @@ class HTTP(unittest.TestCase):
                 os.environ.pop("PERPLEXITY_API_KEY", None)
             else:
                 os.environ["PERPLEXITY_API_KEY"] = prev
+            if prev_vck is None:
+                os.environ.pop("VERCEL_AI_GATEWAY_API_KEY", None)
+            else:
+                os.environ["VERCEL_AI_GATEWAY_API_KEY"] = prev_vck
+            if prev_gw is not None:
+                os.environ["AI_GATEWAY_API_KEY"] = prev_gw
 
 
 class IsolatedApply(unittest.TestCase):
@@ -702,7 +714,7 @@ class IsolatedApply(unittest.TestCase):
             "XAI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY",
             "FX_GATEWAY_BASE_URL",
             "FX_GATEWAY_CHAT_URL", "FX_UPSTREAM_API",
-            "PERPLEXITY_API_KEY",
+            "PERPLEXITY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY",
         ):
             self.prev_env[k] = os.environ.pop(k, None)
         os.environ["FXS_UI_LOCAL"] = "1"
@@ -864,10 +876,119 @@ class IsolatedApply(unittest.TestCase):
     def test_run_perplexity_search_needs_key(self):
         out = gateway.run_perplexity_search({"query": "hello"})
         self.assertIn("Perplexity API key", out.get("error", ""))
+        self.assertIn("Vercel AI Gateway", out.get("error", ""))
         self.assertEqual(gateway.run_perplexity_search({}).get("error"), "search query is required")
         out = gateway.run_perplexity_search({}, fallback_query="hello world")
-        self.assertIn("Perplexity API key", out.get("error", ""))
+        self.assertIn("pplx-", out.get("error", ""))
         self.assertNotEqual(out.get("error"), "search query is required")
+
+    def test_openrouter_keeps_vercel_key_for_search(self):
+        gateway.store_api_key("vck_gateway")
+        self.assertTrue(gateway.current_provider().get("vercel"))
+        out = gateway.apply_provider("openrouter", key="sk-or-v1-test")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertTrue(out.get("gateway_search"))
+        self.assertFalse(out.get("perplexity"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["VERCEL_AI_GATEWAY_API_KEY"], "vck_gateway")
+        self.assertEqual(saved["AI_GATEWAY_API_KEY"], "local")
+        self.assertEqual(saved["OPENAI_API_KEY"], "sk-or-v1-test")
+
+    def test_switch_back_to_vercel_restores_key(self):
+        gateway.store_api_key("vck_gateway")
+        gateway.apply_provider("openrouter", key="sk-or-v1-test")
+        out = gateway.apply_provider("vercel")
+        self.assertTrue(out.get("vercel"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["AI_GATEWAY_API_KEY"], "vck_gateway")
+        self.assertEqual(saved["VERCEL_AI_GATEWAY_API_KEY"], "vck_gateway")
+
+    def test_store_vck_in_search_field_does_not_switch(self):
+        gateway.apply_provider("openrouter", key="sk-or-v1-test")
+        out = gateway.store_perplexity_key("vck_searchonly")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertTrue(out.get("gateway_search"))
+        self.assertFalse(out.get("perplexity"))
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["VERCEL_AI_GATEWAY_API_KEY"], "vck_searchonly")
+        self.assertEqual(saved["OPENAI_API_KEY"], "sk-or-v1-test")
+        self.assertEqual(saved["FX_UPSTREAM"], "https://openrouter.ai/api/v1")
+
+    def test_run_gateway_search_when_no_pplx(self):
+        import urllib.request
+        os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_search"
+        payload = (
+            b'data: {"type":"tool-result","toolName":"perplexity_search",'
+            b'"output":{"results":[{"title":"Hi","url":"https://example.com","snippet":"x"}]}}\n\n'
+            b'data: {"type":"finish","finishReason":{"unified":"stop"}}\n\n'
+        )
+        class FakeSSE:
+            def __init__(self):
+                self._buf = io.BytesIO(payload)
+                self.status = 200
+                self.code = 200
+                self.headers = {"Content-Type": "text/event-stream"}
+            def readline(self, n=-1):
+                return self._buf.readline()
+            def read(self, n=-1):
+                return self._buf.read()
+            def close(self):
+                return None
+        orig = urllib.request.urlopen
+        def fake_open(req, timeout=None):
+            self.assertIn("ai-gateway.vercel.sh", req.full_url)
+            self.assertIn("/v3/ai/language-model", req.full_url)
+            self.assertTrue((req.get_header("Authorization") or "").endswith("vck_search"))
+            return FakeSSE()
+        urllib.request.urlopen = fake_open
+        try:
+            out = gateway.run_perplexity_search({"query": "hello world"})
+        finally:
+            urllib.request.urlopen = orig
+        self.assertEqual(out.get("source"), "vercel-gateway")
+        self.assertEqual(out["results"][0]["url"], "https://example.com")
+        body = json.loads(gateway._gateway_search_body("hello world", 5))
+        self.assertEqual(body["tools"][0]["id"], "gateway.perplexity_search")
+        self.assertEqual(body["toolChoice"]["toolName"], "perplexity_search")
+
+    def test_gateway_event_accepts_provider_tool_name(self):
+        parsed = gateway._tool_result_from_gateway_event({
+            "type": "tool-output-available",
+            "toolName": "gateway.perplexity_search",
+            "output": {"value": [{"title": "T", "url": "https://t.example", "snippet": "s"}]},
+        })
+        self.assertEqual(parsed["results"][0]["url"], "https://t.example")
+
+    def test_pplx_wins_over_gateway(self):
+        import urllib.request
+        os.environ["PERPLEXITY_API_KEY"] = "pplx-first"
+        os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_second"
+        class FakeResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def read(self):
+                return json.dumps({"results": [{"title": "A", "url": "https://a.example", "snippet": "s"}]}).encode()
+        orig = urllib.request.urlopen
+        def fake_open(req, timeout=None):
+            self.assertIn("api.perplexity.ai/search", req.full_url)
+            return FakeResp()
+        urllib.request.urlopen = fake_open
+        try:
+            out = gateway.run_perplexity_search({"query": "q"})
+        finally:
+            urllib.request.urlopen = orig
+        self.assertEqual(out.get("source"), "perplexity")
+        self.assertEqual(out["results"][0]["url"], "https://a.example")
+
+    def test_stamp_changes_with_vercel_search_key(self):
+        a = gateway._gateway_stamp("https://openrouter.ai/api/v1", "auto", "sk-or-a")
+        os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_x"
+        b = gateway._gateway_stamp("https://openrouter.ai/api/v1", "auto", "sk-or-a")
+        self.assertNotEqual(a, b)
+        self.assertFalse(gateway._stamp_matches(a, "https://openrouter.ai/api/v1", "auto", "sk-or-a"))
+        self.assertTrue(gateway._stamp_matches(b, "https://openrouter.ai/api/v1", "auto", "sk-or-a"))
 
     def test_chat_request_enriches_search_schema(self):
         req = gateway.chat_request("m", False, json.dumps({

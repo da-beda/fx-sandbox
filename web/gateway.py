@@ -427,6 +427,7 @@ def current_provider() -> dict[str, Any]:
         "effective_api": "vercel" if not up else effective_api(pid),
         "providers": PROVIDERS,
         "perplexity": bool((os.environ.get("PERPLEXITY_API_KEY") or "").strip()),
+        "gateway_search": bool(vercel_gateway_key()),
     }
 
 
@@ -878,8 +879,29 @@ def perplexity_api_key() -> str:
     return (os.environ.get("PERPLEXITY_API_KEY") or "").strip()
 
 
-def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
-    """POST https://api.perplexity.ai/search. Never raises."""
+def vercel_gateway_key() -> str:
+    """A real vck_ key, even when the LLM is OpenRouter and fx sees AI_GATEWAY_API_KEY=local."""
+    load_env_file()
+    for k in ("VERCEL_AI_GATEWAY_API_KEY", "AI_GATEWAY_API_KEY"):
+        v = (os.environ.get(k) or "").strip()
+        if v.startswith("vck_"):
+            return v
+    return ""
+
+
+def remember_vercel_key(key: str = "") -> str:
+    """Keep a vck_ so web search can use AI Gateway after switching LLM providers."""
+    key = (key or "").strip()
+    if not key.startswith("vck_"):
+        key = vercel_gateway_key()
+    if not key.startswith("vck_"):
+        return ""
+    upsert_env({"VERCEL_AI_GATEWAY_API_KEY": key})
+    os.environ["VERCEL_AI_GATEWAY_API_KEY"] = key
+    return key
+
+
+def _search_query_from_input(inp: Any, fallback_query: str = "") -> str:
     if not isinstance(inp, dict):
         inp = {}
     query = str(inp.get("query") or inp.get("q") or inp.get("search") or "").strip()
@@ -892,18 +914,55 @@ def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
                 break
     if not query:
         query = str(fallback_query or "").strip()
+    return query
+
+
+def _normalize_search_hits(query: str, rows: Any, limit: int) -> dict[str, Any]:
+    if not isinstance(rows, list):
+        return {"error": "search returned no results"}
+    out = []
+    for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
+        out.append({
+            "title": row.get("title") or "",
+            "url": row.get("url") or "",
+            "snippet": str(row.get("snippet") or "")[:800],
+            "date": row.get("date") or row.get("last_updated") or row.get("lastUpdated") or "",
+        })
+    return {"query": query, "results": out, "source": "perplexity"}
+
+
+SEARCH_NO_KEY = (
+    "Web search needs a Perplexity API key (pplx-…) or a Vercel AI Gateway key (vck_…). "
+    "Add one in Settings → Provider → Web search."
+)
+GATEWAY_SEARCH_URL = "https://ai-gateway.vercel.sh/v3/ai/language-model"
+
+
+def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
+    """Direct Perplexity Search if a pplx- key is set, else Vercel AI Gateway. Never raises."""
+    if not isinstance(inp, dict):
+        inp = {}
+    query = _search_query_from_input(inp, fallback_query)
     if not query:
         return {"error": "search query is required"}
-    key = perplexity_api_key()
-    if not key:
-        return {
-            "error": "Web search needs a Perplexity API key. Add one in Settings → Provider → Web search.",
-        }
     raw_n = inp.get("maxResults") or inp.get("max_results") or 5
     try:
         max_results = max(1, min(int(raw_n), 20))
     except (TypeError, ValueError):
         max_results = 5
+    if perplexity_api_key():
+        return run_direct_perplexity_search(query, max_results)
+    if vercel_gateway_key():
+        return run_gateway_search(query, max_results)
+    return {"error": SEARCH_NO_KEY}
+
+
+def run_direct_perplexity_search(query: str, max_results: int = 5) -> dict[str, Any]:
+    key = perplexity_api_key()
+    if not key:
+        return {"error": SEARCH_NO_KEY}
     body = json.dumps({"query": query, "max_results": max_results}).encode()
     req = urllib.request.Request(
         "https://api.perplexity.ai/search",
@@ -924,19 +983,132 @@ def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
     except Exception as e:
         return {"error": f"Perplexity search failed. {e}"}
     rows = data.get("results") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        return {"error": "Perplexity returned no results"}
-    out = []
-    for row in rows[:max_results]:
-        if not isinstance(row, dict):
-            continue
-        out.append({
-            "title": row.get("title") or "",
-            "url": row.get("url") or "",
-            "snippet": str(row.get("snippet") or "")[:800],
-            "date": row.get("date") or row.get("last_updated") or "",
-        })
-    return {"query": query, "results": out}
+    out = _normalize_search_hits(query, rows, max_results)
+    if "results" in out:
+        out["source"] = "perplexity"
+    return out
+
+
+def _gateway_search_body(query: str, max_results: int) -> bytes:
+    return json.dumps({
+        "prompt": [{
+            "role": "user",
+            "content": [{
+                "type": "text",
+                "text": "Call perplexity_search once with query " + json.dumps(query) + ". Do not answer otherwise.",
+            }],
+        }],
+        "tools": [{
+            "type": "provider",
+            "id": "gateway.perplexity_search",
+            "name": "perplexity_search",
+            "args": {"maxResults": max_results},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "number"},
+                },
+                "required": ["query"],
+            },
+        }],
+        "toolChoice": {"type": "tool", "toolName": "perplexity_search"},
+        "maxOutputTokens": 512,
+    }, separators=(",", ":")).encode()
+
+
+def _is_search_tool_name(name: str) -> bool:
+    n = (name or "").strip()
+    if not n:
+        return False
+    if n in SEARCH_TOOL_NAMES:
+        return True
+    low = n.lower()
+    return "perplexity_search" in low or low in ("search", "websearch")
+
+
+def _tool_result_from_gateway_event(obj: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(obj, dict):
+        return None
+    if obj.get("type") not in ("tool-result", "tool-output-available"):
+        return None
+    name = obj.get("toolName") or obj.get("name") or ""
+    if name and not _is_search_tool_name(str(name)):
+        return None
+    raw = obj.get("output")
+    if raw is None:
+        raw = obj.get("result")
+    if isinstance(raw, dict) and isinstance(raw.get("value"), dict):
+        raw = raw["value"]
+    elif isinstance(raw, dict) and isinstance(raw.get("value"), list):
+        raw = {"results": raw["value"]}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"error": raw[:400]}
+    if isinstance(raw, list):
+        return {"results": raw}
+    if isinstance(raw, dict):
+        return raw
+    return None
+
+
+def run_gateway_search(query: str, max_results: int = 5) -> dict[str, Any]:
+    """Ask Vercel AI Gateway to execute perplexity_search. Never raises."""
+    key = vercel_gateway_key()
+    if not key:
+        return {"error": SEARCH_NO_KEY}
+    req = urllib.request.Request(
+        GATEWAY_SEARCH_URL,
+        data=_gateway_search_body(query, max_results),
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + key,
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "ai-language-model-id": VERCEL_DEFAULT_MODEL,
+            "ai-language-model-streaming": "true",
+        },
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=45)
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", "replace")[:300]
+        return {"error": f"Vercel AI Gateway search failed (HTTP {e.code}). {err}"}
+    except Exception as e:
+        return {"error": f"Vercel AI Gateway search failed. {e}"}
+    found: Optional[dict[str, Any]] = None
+    try:
+        for data in read_sse_data(resp):
+            if not data or data.strip() == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            parsed = _tool_result_from_gateway_event(obj)
+            if parsed is not None:
+                found = parsed
+                break
+    except Exception as e:
+        return {"error": f"Vercel AI Gateway search failed. {e}"}
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
+    if found is None:
+        return {"error": "Vercel AI Gateway did not run web search."}
+    if found.get("error") and not found.get("results"):
+        msg = found.get("message") or found.get("error")
+        return {"error": f"Vercel AI Gateway search failed. {msg}"}
+    rows = found.get("results") if isinstance(found.get("results"), list) else None
+    if rows is None:
+        return found if found.get("query") or found.get("results") else {"error": "Vercel AI Gateway returned no results"}
+    out = _normalize_search_hits(query, rows, max_results)
+    out["source"] = "vercel-gateway"
+    return out
 
 
 class Stream:
@@ -1806,7 +1978,10 @@ def stop_gateway(listen: str = LISTEN_DEFAULT) -> None:
 
 
 def _gateway_stamp(upstream: str, api: str, api_key: str = "") -> str:
-    return f"{upstream.rstrip('/')}\n{api}\n{_key_fp(api_key)}\n{_key_fp(perplexity_api_key())}\n"
+    return (
+        f"{upstream.rstrip('/')}\n{api}\n{_key_fp(api_key)}\n"
+        f"{_key_fp(perplexity_api_key())}\n{_key_fp(vercel_gateway_key())}\n"
+    )
 
 
 def _key_fp(key: str) -> str:
@@ -1826,7 +2001,8 @@ def _stamp_matches(text: str, upstream: str, api: str, api_key: str = "") -> boo
     ):
         return False
     have_pplx = lines[3] if len(lines) > 3 else "-"
-    return have_pplx == _key_fp(perplexity_api_key())
+    have_vck = lines[4] if len(lines) > 4 else "-"
+    return have_pplx == _key_fp(perplexity_api_key()) and have_vck == _key_fp(vercel_gateway_key())
 
 
 def ensure_gateway(
@@ -1950,8 +2126,10 @@ def store_api_key(key: str) -> dict[str, Any]:
     if hint == "perplexity" or key.startswith("pplx-"):
         return store_perplexity_key(key)
     if hint == "vercel" or key.startswith("vck_"):
+        remember_vercel_key(key)
         upsert_env({
             "AI_GATEWAY_API_KEY": key,
+            "VERCEL_AI_GATEWAY_API_KEY": key,
             "OPENAI_API_KEY": None,
             "OPENROUTER_API_KEY": None,
             "FX_UPSTREAM": None,
@@ -1961,6 +2139,7 @@ def store_api_key(key: str) -> dict[str, Any]:
             "FX_GATEWAY_CHAT_URL": None,
         })
         os.environ["AI_GATEWAY_API_KEY"] = key
+        os.environ["VERCEL_AI_GATEWAY_API_KEY"] = key
         for k in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "FX_UPSTREAM", "OPENAI_BASE_URL",
                   "FX_UPSTREAM_API", "FX_GATEWAY_BASE_URL", "FX_GATEWAY_CHAT_URL"):
             os.environ.pop(k, None)
@@ -1968,6 +2147,10 @@ def store_api_key(key: str) -> dict[str, Any]:
         out = current_provider()
         out["saved"] = True
         return out
+    load_env_file()
+    cur_gw = (os.environ.get("AI_GATEWAY_API_KEY") or "").strip()
+    if cur_gw.startswith("vck_"):
+        remember_vercel_key(cur_gw)
     updates: dict[str, Optional[str]] = {
         "OPENAI_API_KEY": key,
         "AI_GATEWAY_API_KEY": "local",
@@ -1994,8 +2177,10 @@ def store_api_key(key: str) -> dict[str, Any]:
 
 
 def store_perplexity_key(key: str) -> dict[str, Any]:
-    """Persist PERPLEXITY_API_KEY for provider-executed web search."""
+    """Persist a search key. pplx- hits Perplexity directly; vck_ is Gateway search-only."""
     key = (key or "").strip()
+    if key.startswith("vck_"):
+        return store_vercel_search_key(key)
     load_env_file()
     if not key or key.lower() in ("clear", "none", "-"):
         upsert_env({"PERPLEXITY_API_KEY": None})
@@ -2003,6 +2188,22 @@ def store_perplexity_key(key: str) -> dict[str, Any]:
     else:
         upsert_env({"PERPLEXITY_API_KEY": key})
         os.environ["PERPLEXITY_API_KEY"] = key
+    return _after_search_key()
+
+
+def store_vercel_search_key(key: str) -> dict[str, Any]:
+    """Persist VERCEL_AI_GATEWAY_API_KEY for search without switching the LLM provider."""
+    key = (key or "").strip()
+    load_env_file()
+    if not key or key.lower() in ("clear", "none", "-"):
+        upsert_env({"VERCEL_AI_GATEWAY_API_KEY": None})
+        os.environ.pop("VERCEL_AI_GATEWAY_API_KEY", None)
+    else:
+        remember_vercel_key(key)
+    return _after_search_key()
+
+
+def _after_search_key() -> dict[str, Any]:
     offline = os.environ.get("FXS_UI_LOCAL", "") in ("1", "true", "yes")
     warn = ""
     if configured_upstream() and not offline:
@@ -2041,14 +2242,19 @@ def apply_provider(name_or_url: str, model: str = "", api: str = "", key: str = 
     if spec["url"]:
         current = parse_env_file()
         gw_key = current.get("AI_GATEWAY_API_KEY", "")
+        if gw_key.startswith("vck_"):
+            updates["VERCEL_AI_GATEWAY_API_KEY"] = gw_key
         if not gw_key or gw_key.startswith("vck_"):
             updates["AI_GATEWAY_API_KEY"] = "local"
         if api:
             updates["FX_UPSTREAM_API"] = normalize_api(api)
     else:
         current = parse_env_file()
+        saved_vck = current.get("VERCEL_AI_GATEWAY_API_KEY") or ""
         if current.get("AI_GATEWAY_API_KEY") == "local":
-            updates["AI_GATEWAY_API_KEY"] = None
+            updates["AI_GATEWAY_API_KEY"] = saved_vck if saved_vck.startswith("vck_") else None
+        elif saved_vck.startswith("vck_") and not (current.get("AI_GATEWAY_API_KEY") or "").startswith("vck_"):
+            updates["AI_GATEWAY_API_KEY"] = saved_vck
         updates["FX_UPSTREAM_API"] = None
         updates["FX_GATEWAY_BASE_URL"] = None
         updates["FX_GATEWAY_CHAT_URL"] = None

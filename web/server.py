@@ -1115,6 +1115,7 @@ class Handler(BaseHTTPRequestHandler):
             "effective_api": info.get("effective_api"),
             "providers": info.get("providers"),
             "perplexity": info.get("perplexity"),
+            "gateway_search": info.get("gateway_search"),
         }
         if info.get("warn"):
             body["warn"] = info["warn"]
