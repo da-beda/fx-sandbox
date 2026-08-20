@@ -219,11 +219,25 @@ textarea, input {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  padding: 28px 14px 12px;
   overflow: auto;
   white-space: pre;
   text-wrap: unset;
+  position: relative;
 }
+.msg pre .copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 11px;
+  font-weight: 590;
+  color: var(--subtle);
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+}
+.msg pre .copy:hover { color: var(--fg); }
+.chip.on { font-weight: 590; }
 .msg pre code { border: 0; background: none; padding: 0; }
 .msg.tools {
   align-self: stretch;

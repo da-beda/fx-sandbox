@@ -18,12 +18,14 @@
     busy: false,
     demo: true,
     resume: localStorage.getItem("fxs.resume") || "last",
-    yolo: localStorage.getItem("fxs.yolo") !== "0",
+    perm: localStorage.getItem("fxs.perm") || (localStorage.getItem("fxs.yolo") === "0" ? "auto" : "yolo"),
     theme: localStorage.getItem("fxs.theme") || "system",
     history: JSON.parse(localStorage.getItem("fxs.history") || "[]"),
     histIdx: -1,
     abort: null,
     model: "",
+    queue: [],
+    lastAnswer: "",
   };
 
   function basename(p) {
@@ -50,11 +52,28 @@
     $("project").title = state.workspace || "Workspace";
   }
 
-  function setYolo(on) {
-    state.yolo = on;
-    localStorage.setItem("fxs.yolo", on ? "1" : "0");
-    permBtn.textContent = on ? "yolo" : "auto";
-    permBtn.classList.toggle("on", on);
+  function setPerm(p) {
+    const next = p === "ask" || p === "auto" || p === "yolo" ? p : "yolo";
+    state.perm = next;
+    localStorage.setItem("fxs.perm", next);
+    permBtn.textContent = next;
+    permBtn.classList.toggle("on", next === "yolo");
+    permBtn.title = "Permissions · " + next;
+  }
+
+  function cyclePerm() {
+    const order = ["ask", "auto", "yolo"];
+    setPerm(order[(order.indexOf(state.perm) + 1) % order.length]);
+  }
+
+  function newSession() {
+    state.resume = "";
+    localStorage.removeItem("fxs.resume");
+    state.queue = [];
+    state.lastAnswer = "";
+    thread.innerHTML = "";
+    refreshStatus();
+    promptEl.focus();
   }
 
   function grow() {
@@ -63,8 +82,8 @@
   }
 
   function esc(s) {
-    return String(s).replace(/[&<>"]/g, (c) =>
-      ({ "&": "&", "<": "<", ">": ">", '"': """ }[c]));
+    const ent = { "&": "&" + "amp;", "<": "&" + "lt;", ">": "&" + "gt;", '"': "&" + "quot;" };
+    return String(s).replace(/[&<>"]/g, (c) => ent[c]);
   }
 
   function fuzzy(query, text) {
@@ -108,8 +127,10 @@
     { id: "clear", hint: "New session" },
     { id: "new", hint: "New session" },
     { id: "resume", hint: "Pick a session" },
+    { id: "compact", hint: "Summarize older turns" },
+    { id: "copy", hint: "Copy last reply" },
     { id: "models", hint: "Switch model" },
-    { id: "permissions", hint: "yolo / auto" },
+    { id: "permissions", hint: "ask / auto / yolo" },
     { id: "status", hint: "Runtime" },
     { id: "usage", hint: "Local spend" },
     { id: "credits", hint: "Gateway balance" },
@@ -230,10 +251,16 @@
 
   async function runCommand(id) {
     if (id === "clear" || id === "new") {
-      state.resume = "";
-      localStorage.removeItem("fxs.resume");
-      thread.innerHTML = "";
-      refreshStatus();
+      newSession();
+      return;
+    }
+    if (id === "copy") {
+      if (state.lastAnswer) navigator.clipboard.writeText(state.lastAnswer);
+      return;
+    }
+    if (id === "compact") {
+      if (!state.workspace) return;
+      send("Compact the earlier turns of this session. Keep the last few messages intact.");
       return;
     }
     if (id === "resume") {
@@ -242,7 +269,7 @@
       return;
     }
     if (id === "models") { openModels(); return; }
-    if (id === "permissions") { setYolo(!state.yolo); return; }
+    if (id === "permissions") { cyclePerm(); return; }
     if (id === "help") {
       showInfo("Commands", COMMANDS.map((c) => "/" + c.id + "  " + c.hint).join("\n"));
       return;
@@ -313,12 +340,32 @@
       .replace(/\n/g, "<br>");
   }
 
+  function decorate(el) {
+    el.querySelectorAll("pre").forEach((pre) => {
+      if (pre.querySelector(".copy")) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "copy";
+      b.textContent = "Copy";
+      b.addEventListener("click", () => {
+        const code = pre.querySelector("code");
+        navigator.clipboard.writeText((code || pre).innerText);
+        b.textContent = "Copied";
+        setTimeout(() => { b.textContent = "Copy"; }, 1100);
+      });
+      pre.appendChild(b);
+    });
+  }
+
   function addMsg(kind, text) {
     const el = document.createElement("div");
     el.className = "msg " + kind;
     if (kind === "user") el.textContent = text;
     else if (kind === "tools") el.innerHTML = text;
-    else el.innerHTML = render(text || "");
+    else {
+      el.innerHTML = render(text || "");
+      decorate(el);
+    }
     thread.appendChild(el);
     thread.scrollTop = thread.scrollHeight;
     return el;
@@ -400,17 +447,32 @@
   }
 
   async function send(text) {
-    if (state.busy) { stop(); return; }
-    if (!text.trim()) return;
+    if (!text.trim()) {
+      if (state.busy) stop();
+      return;
+    }
     const slash = text.trim();
     if (slash.startsWith("/") && !slash.includes(" ") && !slash.includes("@")) {
       const id = slash.slice(1).toLowerCase();
       if (COMMANDS.some((c) => c.id === id)) {
         promptEl.value = "";
         grow();
+        hidePalette();
         runCommand(id);
         return;
       }
+    }
+    if (!state.workspace) {
+      folderDlg.showModal();
+      folderInput.focus();
+      return;
+    }
+    if (state.busy) {
+      state.queue.push(text.trim());
+      promptEl.value = "";
+      grow();
+      setActivity("queued · " + state.queue.length);
+      return;
     }
     if (!state.workspace) {
       folderDlg.showModal();
@@ -441,7 +503,8 @@
           prompt: text,
           workspace: state.workspace,
           resume: state.resume || "last",
-          yolo: state.yolo,
+          perm: state.perm,
+          yolo: state.perm === "yolo",
         }),
       });
       if (!res.ok || !res.body) throw new Error("request failed");
@@ -463,11 +526,16 @@
             acc += ev.text || "";
             bot.classList.remove("pending");
             bot.innerHTML = render(acc);
+            decorate(bot);
+            state.lastAnswer = acc;
           } else if (ev.type === "activity") {
-            setActivity(ev.text || "");
+            setActivity(ev.text || (state.queue.length ? "queued · " + state.queue.length : ""));
           } else if (ev.type === "tools" && ev.tools) {
-            const row = addMsg("tools", ev.tools.map((t) =>
-              '<span class="tool">' + esc(t.name || t) + "</span>").join(""));
+            const row = addMsg("tools", ev.tools.map((t) => {
+              const name = t.name || t;
+              const path = t.path || "";
+              return '<span class="tool">' + esc(name) + (path ? " " + esc(path) : "") + "</span>";
+            }).join(""));
             thread.insertBefore(row, bot);
           } else if (ev.type === "session" && ev.id) {
             state.resume = ev.id;
@@ -492,11 +560,16 @@
       state.abort = null;
       promptEl.focus();
       refreshStatus();
+      if (state.queue.length) {
+        const next = state.queue.shift();
+        send(next);
+      }
     }
   }
 
   $("composer").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (state.busy) { stop(); return; }
     send(promptEl.value);
   });
   promptEl.addEventListener("input", () => { grow(); updatePalette(); });
@@ -567,18 +640,28 @@
   });
   $("new-session").addEventListener("click", (e) => {
     e.preventDefault();
-    state.resume = "";
-    localStorage.removeItem("fxs.resume");
-    thread.innerHTML = "";
+    newSession();
     sessionsDlg.close();
-    refreshStatus();
   });
-  permBtn.addEventListener("click", () => setYolo(!state.yolo));
+  $("new-btn").addEventListener("click", newSession);
+  permBtn.addEventListener("click", cyclePerm);
   $("theme-btn").addEventListener("click", cycleTheme);
   $("model-btn").addEventListener("click", openModels);
 
+  $("composer").addEventListener("dragover", (e) => { e.preventDefault(); });
+  $("composer").addEventListener("drop", (e) => {
+    e.preventDefault();
+    const names = [...(e.dataTransfer.files || [])].map((f) => f.name).filter(Boolean);
+    if (!names.length) return;
+    const extra = names.map((n) => "@" + n).join(" ");
+    promptEl.value = (promptEl.value ? promptEl.value.replace(/\s*$/, " ") : "") + extra + " ";
+    grow();
+    updatePalette();
+    promptEl.focus();
+  });
+
   applyTheme();
-  setYolo(state.yolo);
+  setPerm(state.perm);
   setWorkspace(state.workspace);
   refreshStatus();
   promptEl.focus();

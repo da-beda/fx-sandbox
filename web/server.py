@@ -501,19 +501,28 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _demo(self, prompt: str, emit) -> None:
-        emit({"type": "tools", "tools": [{"name": "read"}, {"name": "search"}]})
-        emit({"type": "activity", "text": "read"})
-        time.sleep(0.25)
-        text = (
-            f"**{prompt.strip()[:48]}**\n\n"
-            "Demo — this machine has no Docker, so nothing ran.\n\n"
-            "On yours:\n\n"
-            "```\ncd /path/to/project\nfxs ui\n```\n\n"
-            "Same sandbox as `fxs`. `/` commands, `@` files. Esc stops."
+        emit({"type": "tools", "tools": [{"name": "read", "path": "README.md"}]})
+        emit({"type": "activity", "text": "read README.md"})
+        time.sleep(0.2)
+        head = (
+            "I'll look at the project, then answer.\n\n"
+            f"You asked: **{prompt.strip()[:80]}**\n\n"
         )
-        for word in text.split(" "):
+        for word in head.split(" "):
             emit({"type": "token", "text": word + " "})
-            time.sleep(0.016)
+            time.sleep(0.012)
+        emit({"type": "tools", "tools": [{"name": "read", "path": "web/app.js"}]})
+        emit({"type": "activity", "text": "read web/app.js"})
+        time.sleep(0.18)
+        rest = (
+            "Demo machine — no Docker, so fx did not run.\n\n"
+            "On yours this is the same loop as the CLI: `@` files, `/` commands, "
+            "Enter to send, Esc to stop, Enter again to queue.\n\n"
+            "```\ncd /path/to/project\nfxs ui\n```\n"
+        )
+        for word in rest.split(" "):
+            emit({"type": "token", "text": word + " "})
+            time.sleep(0.012)
         emit({"type": "activity", "text": ""})
         emit({"type": "done"})
 
