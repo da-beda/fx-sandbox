@@ -225,12 +225,60 @@ find_fx() {
 }
 
 load_fx_env() {
-  if [[ -z "${AI_GATEWAY_API_KEY:-}" && -r "${HOME}/.config/fx/env" ]]; then
+  if [[ -r "${HOME}/.config/fx/env" ]]; then
+    local had_key="${AI_GATEWAY_API_KEY-}"
+    local had_up="${FX_UPSTREAM-}"
+    local had_oai="${OPENAI_API_KEY-}"
+    local had_base="${OPENAI_BASE_URL-}"
+    local had_api="${FX_UPSTREAM_API-}"
     set -a
     # shellcheck disable=SC1090
     . "${HOME}/.config/fx/env"
     set +a
+    [[ -n "$had_key" ]] && AI_GATEWAY_API_KEY="$had_key"
+    [[ -n "$had_up" ]] && FX_UPSTREAM="$had_up"
+    [[ -n "$had_oai" ]] && OPENAI_API_KEY="$had_oai"
+    [[ -n "$had_base" ]] && OPENAI_BASE_URL="$had_base"
+    [[ -n "$had_api" ]] && FX_UPSTREAM_API="$had_api"
   fi
+}
+
+gateway_py() {
+  if [[ -f "${SCRIPT_DIR}/web/gateway.py" ]]; then
+    printf '%s\n' "${SCRIPT_DIR}/web/gateway.py"
+    return 0
+  fi
+  if [[ -f "${HOME}/.local/share/fx-sandbox/web/gateway.py" ]]; then
+    printf '%s\n' "${HOME}/.local/share/fx-sandbox/web/gateway.py"
+    return 0
+  fi
+  return 1
+}
+
+openai_upstream() {
+  printf '%s' "${FX_UPSTREAM:-${OPENAI_BASE_URL:-}}"
+}
+
+ensure_host_gateway() {
+  local up py
+  up="$(openai_upstream)"
+  [[ -n "$up" ]] || return 0
+  py="$(gateway_py)" || {
+    warn "FX_UPSTREAM is set but web/gateway.py is missing — fxs unpack, then retry"
+    return 0
+  }
+  command -v python3 >/dev/null 2>&1 || {
+    warn "python3 is required to talk to an OpenAI-compatible provider"
+    return 0
+  }
+  # shellcheck disable=SC1090
+  eval "$(python3 "$py" --ensure --listen "${FXS_GATEWAY_LISTEN:-127.0.0.1:18787}" --upstream "$up" --print-env)" \
+    || warn "could not start the OpenAI loopback translator (see ~/.local/share/fx-sandbox/gateway.log)"
+}
+
+rewrite_upstream_for_docker() {
+  local up="$1"
+  printf '%s' "$up" | sed -E 's#^(https?://)(127\.0\.0\.1|localhost|\[::1\])(:|/)#\1host.docker.internal\3#'
 }
 
 # Docker is optional: if it is missing, idle, or we are root (the
@@ -270,6 +318,7 @@ native_fx_exec() {
     export FX_PERMISSION_MODE="${FX_PERMISSION_MODE:-auto}"
   fi
   export FX_MODEL="${FX_MODEL:-zai/glm-5.2}"
+  ensure_host_gateway
   if [[ $DRY -eq 1 ]]; then
     printf '%q' "$fx_bin"
     if [[ ${#FX_ARGS[@]} -gt 0 ]]; then printf ' %q' "${FX_ARGS[@]}"; fi
@@ -328,20 +377,11 @@ if [[ -n "$ENV_FILE" ]]; then
   fi
 fi
 
-if [[ -z "${AI_GATEWAY_API_KEY:-}" && -z "$ENV_FILE" && -z "${VERCEL_OIDC_TOKEN:-}" ]]; then
-  # Convenient fallback: the file setup-fx.sh may have written.
-  if [[ -r "${HOME}/.config/fx/env" ]]; then
-    # shellcheck disable=SC1091
-    set -a
-    # shellcheck disable=SC1090
-    . "${HOME}/.config/fx/env"
-    set +a
-    log "loaded ${HOME}/.config/fx/env"
-  fi
-fi
+load_fx_env
 
-if [[ -z "${AI_GATEWAY_API_KEY:-}" && -z "$ENV_FILE" && -z "${VERCEL_OIDC_TOKEN:-}" ]]; then
+if [[ -z "${AI_GATEWAY_API_KEY:-}" && -z "$ENV_FILE" && -z "${VERCEL_OIDC_TOKEN:-}" && -z "$(openai_upstream)" ]]; then
   warn "AI_GATEWAY_API_KEY is unset. fx will start but cannot call a model."
+  warn "Paste a vck_ key (fxs key) or point at OpenAI-compatible /v1 (fxs provider xai)."
 fi
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
@@ -390,6 +430,7 @@ DOCKER_ARGS=(
   --memory "$MEMORY"
   --cpus "$CPUS"
   --network "$NETWORK"
+  --add-host "host.docker.internal:host-gateway"
   -e "HOME=/home/fx"
   -e "FX_HOME=/home/fx/.fx"
   -e "FX_DISABLE_KEYCHAIN=1"
@@ -404,6 +445,30 @@ if [[ -n "${AI_GATEWAY_API_KEY:-}" ]]; then
 fi
 if [[ -n "${VERCEL_OIDC_TOKEN:-}" ]]; then
   DOCKER_ARGS+=(-e "VERCEL_OIDC_TOKEN")
+fi
+# OpenAI-compatible upstream: the translator runs *inside* the container
+# (fx only accepts loopback). Rewrite host loopback so Ollama on the laptop
+# is reachable as host.docker.internal.
+_up="$(openai_upstream)"
+if [[ -n "$_up" ]]; then
+  _up="$(rewrite_upstream_for_docker "$_up")"
+  DOCKER_ARGS+=(-e "FX_UPSTREAM=${_up}" -e "OPENAI_BASE_URL=${_up}")
+  if [[ -n "${FX_UPSTREAM_API:-}" ]]; then
+    DOCKER_ARGS+=(-e "FX_UPSTREAM_API")
+  fi
+  log "openai upstream=${_up} (loopback translator inside the box)"
+fi
+if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  DOCKER_ARGS+=(-e "OPENAI_API_KEY")
+fi
+if [[ -n "${OLLAMA_API_KEY:-}" ]]; then
+  DOCKER_ARGS+=(-e "OLLAMA_API_KEY")
+fi
+if [[ -n "${XAI_API_KEY:-}" ]]; then
+  DOCKER_ARGS+=(-e "XAI_API_KEY")
+fi
+if [[ -n "${GROQ_API_KEY:-}" ]]; then
+  DOCKER_ARGS+=(-e "GROQ_API_KEY")
 fi
 if [[ -n "$ENV_FILE" ]]; then
   DOCKER_ARGS+=(--env-file "$ENV_FILE")

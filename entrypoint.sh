@@ -72,14 +72,43 @@ if [[ -d /workspace && ! -e /workspace/.fx.json && -r /usr/local/share/fx-sandbo
   fi
 fi
 
-if [[ -z "${AI_GATEWAY_API_KEY:-}" && -z "${VERCEL_OIDC_TOKEN:-}" ]]; then
-  warn "no AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN in the environment."
-  warn "fx will not be able to call a model until you pass one (see run-fx.sh)."
-fi
-
-# Never dump the key. Confirm only that it *looks* like a gateway token.
-if [[ -n "${AI_GATEWAY_API_KEY:-}" && ! "${AI_GATEWAY_API_KEY}" =~ ^vck_ ]]; then
-  warn "AI_GATEWAY_API_KEY does not start with vck_ — is this the right secret?"
+if [[ -z "${FX_UPSTREAM:-${OPENAI_BASE_URL:-}}" ]]; then
+  if [[ -z "${AI_GATEWAY_API_KEY:-}" && -z "${VERCEL_OIDC_TOKEN:-}" ]]; then
+    warn "no AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN in the environment."
+    warn "fx will not be able to call a model until you pass one (see run-fx.sh)."
+  fi
+  # Never dump the key. Confirm only that it *looks* like a gateway token.
+  if [[ -n "${AI_GATEWAY_API_KEY:-}" && ! "${AI_GATEWAY_API_KEY}" =~ ^vck_ ]]; then
+    warn "AI_GATEWAY_API_KEY does not start with vck_ — is this the right secret?"
+  fi
+else
+  # OpenAI-compatible /v1: run the translator on loopback. fx will not
+  # send traffic anywhere else.
+  _gw_py="/usr/local/share/fx-sandbox/gateway.py"
+  _gw_listen="127.0.0.1:18787"
+  _up="${FX_UPSTREAM:-${OPENAI_BASE_URL}}"
+  if [[ ! -f "$_gw_py" ]] || ! command -v python3 >/dev/null 2>&1; then
+    warn "OpenAI-compatible upstream is set, but this image cannot translate it."
+    warn "Rebuild the image: fxs build"
+  else
+    python3 "$_gw_py" --listen "$_gw_listen" --upstream "$_up" \
+      --api "${FX_UPSTREAM_API:-auto}" \
+      >/tmp/fx-gateway.log 2>&1 &
+    _i=0
+    while [[ $_i -lt 40 ]]; do
+      if python3 -c "import urllib.request; urllib.request.urlopen('http://${_gw_listen}/healthz', timeout=0.2).read()" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.05
+      _i=$((_i + 1))
+    done
+    export FX_GATEWAY_BASE_URL="http://${_gw_listen}"
+    export FX_GATEWAY_CHAT_URL="http://${_gw_listen}/v3/ai/language-model"
+    if [[ -z "${AI_GATEWAY_API_KEY:-}" ]]; then
+      export AI_GATEWAY_API_KEY=local
+    fi
+    log "openai gateway → ${_up}"
+  fi
 fi
 
 # Default command is `fx`. Prefix it for fx subcommands and for flags

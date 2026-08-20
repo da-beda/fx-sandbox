@@ -53,6 +53,7 @@ fxs --no-yolo                              # prompt before tools
 fxs ask "what is 17*19?"
 fxs status
 fxs key                                    # paste / replace the key
+fxs provider                               # Vercel, or any OpenAI /v1
 ```
 
 On macOS, native `fx` already uses the OS sandbox (`sandbox=os`).
@@ -77,7 +78,8 @@ If Docker is missing, idle, or you are root, `fxs` falls through to native `fx`.
 | `fxs ui` | Optional local web UI (`http://127.0.0.1:8787`) |
 | `fxs build` | Build `fx-sandbox:latest` |
 | `fxs status` | Binary, key, Docker, image, PATH |
-| `fxs key` | (Re)prompt for the gateway key |
+| `fxs key` | (Re)prompt for a Vercel or OpenAI-compatible key |
+| `fxs provider` | `vercel` / `openai` / `xai` / `openrouter` / `ollama` / a `/v1` URL (`--api auto\|chat\|responses`) |
 | `fxs unpack [dir]` | Write Dockerfile / compose out |
 | `fxs uninstall` | Remove the CLI and kit (`-y` to skip confirm) |
 | `fxs install` | Re-run the installer |
@@ -135,6 +137,50 @@ Skip the prompt with `--skip-key-prompt`, `--non-interactive`,
 `--in-container`, or `CI=true`. `--key-timeout SEC` changes the wait
 (`0` = forever).
 
+## Any OpenAI-compatible API
+
+fx speaks Vercel’s Gateway protocol and will not send traffic off
+loopback. Pointing `FX_GATEWAY_BASE_URL` at OpenAI, xAI, Ollama, or
+OpenRouter does nothing. `fxs` starts a small loopback translator
+(same job as [fx-openai](https://github.com/BorjaGM1/fx-openai)) and
+keeps fx talking to `127.0.0.1`.
+
+```bash
+fxs provider xai                 # URL, key prompt, grok-4
+fxs models                       # confirm
+fxs
+```
+
+Presets: `vercel` (default), `openai`, `xai`, `openrouter`, `ollama`,
+`lmstudio`, `groq`, `together`, `fireworks`, `deepseek`, `mistral`,
+or any `https://…/v1` URL.
+
+```bash
+fxs provider ollama              # http://127.0.0.1:11434/v1 — no key
+fxs provider https://host:8000/v1
+fxs provider xai --model grok-3  # override the default id
+fxs provider xai --api chat      # force Chat Completions
+```
+
+OpenAI and xAI use the Responses API (`/v1/responses`) by default —
+reasoning and tool items, prompts not stored (`store: false`). Everything
+else stays on Chat Completions. Auto falls back if `/responses` is
+missing. Override with `--api auto|chat|responses` or
+`FX_UPSTREAM_API`.
+
+Inside Docker, host loopback is rewritten to `host.docker.internal`
+so a laptop Ollama is still reachable. Rebuild once (`fxs build`) so
+the image has the translator.
+
+Same env file as the Vercel key:
+
+```bash
+export FX_UPSTREAM=https://api.x.ai/v1
+export OPENAI_API_KEY=xai-…
+export FX_MODEL=grok-4
+# export FX_UPSTREAM_API=responses   # auto | chat | responses
+```
+
 ## Sandbox
 
 `fxs run` always uses `--user $(id -u):$(id -g)`, a read-only rootfs,
@@ -164,7 +210,8 @@ Default model: `zai/glm-5.2` (not `-fast`).
 
 1. `https://releases.fx.sh/…` — fx tarball + checksum  
 2. Docker Hub — `ubuntu:24.04`, if you build the image  
-3. `https://ai-gateway.vercel.sh` — model calls at run time  
+3. `https://ai-gateway.vercel.sh` — model calls at run time (Vercel)  
+4. Your `FX_UPSTREAM` host — if you switched provider (`fxs provider`)  
 
 The installer is self-contained. It does not fetch companion files
 from GitHub except to persist a copy of itself onto disk after

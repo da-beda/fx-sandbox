@@ -18,6 +18,17 @@
   const edGutter = $("ed-gutter");
   const PERMS = ["ask", "auto", "yolo"];
   const THEMES = ["system", "light", "dark"];
+  const PERM_HINT = {
+    ask: "Prompt before each tool",
+    auto: "Allow reads; prompt for writes",
+    yolo: "Allow all tools",
+  };
+  const SET_PAGES = {
+    provider: "Provider",
+    model: "Model",
+    sessions: "Sessions",
+    diag: "Diagnostics",
+  };
   const ICO = {
     chev: '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3.2 1.6 7 5 3.2 8.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     folder: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.2 1.5h5.2A1.2 1.2 0 0 1 13.7 5.7v6.1A1.2 1.2 0 0 1 12.5 13H3.7A1.2 1.2 0 0 1 2.5 11.8V4.2Z" stroke="currentColor" stroke-width="1.3"/></svg>',
@@ -73,6 +84,13 @@
     editing: false,
     status: null,
     kind: "",
+    provider: "",
+    providerLabel: "",
+    api: "auto",
+    settingsOn: false,
+    settingsPage: "",
+    models: [],
+    sessionCount: 0,
     railOn: localStorage.getItem("fxs.railOn") === "1",
     sessions: [],
   };
@@ -87,6 +105,10 @@
 
   function mobile() {
     return window.matchMedia("(max-width: 840px)").matches;
+  }
+
+  function hasChat() {
+    return !!thread.querySelector(".msg.user, .msg.assistant");
   }
 
   function applyWrap() {
@@ -156,6 +178,8 @@
     document.querySelectorAll("#perm-seg [data-perm]").forEach((b) => {
       b.classList.toggle("on", b.getAttribute("data-perm") === state.perm);
     });
+    const hint = $("perm-hint");
+    if (hint) hint.textContent = PERM_HINT[state.perm] || "";
   }
 
   function grow() {
@@ -476,27 +500,51 @@
     return acc;
   }
 
+  function applySideWidth() {
+    const w = state.filesW + "px";
+    filesEl.style.setProperty("--files-w", w);
+    settings.style.setProperty("--files-w", w);
+  }
+
+  function updateVeil() {
+    veil.hidden = !(mobile() && ((state.filesOn && !state.editing) || state.settingsOn || state.railOn));
+  }
+
+  function hideSettings() {
+    if (!state.settingsOn) return;
+    commitFolder();
+    state.settingsOn = false;
+    state.settingsPage = "";
+    settings.hidden = true;
+    settings.classList.remove("paging");
+    $("settings-home").inert = false;
+    $("settings-page").inert = true;
+    $("more").classList.remove("on");
+    $("more").setAttribute("aria-expanded", "false");
+    updateVeil();
+  }
+
   async function showFiles(on) {
     if (!on && state.editing) {
       if (!(await maybeSave())) return;
     }
+    if (on) hideSettings();
     state.filesOn = !!on;
     if (!mobile()) localStorage.setItem("fxs.filesOn", on ? "1" : "0");
     filesEl.hidden = !on;
-    updateVeil();
     document.body.classList.toggle("files-on", on);
     $("files-btn").classList.toggle("on", on);
     $("files-btn").setAttribute("aria-expanded", on ? "true" : "false");
-    filesEl.style.setProperty("--files-w", state.filesW + "px");
+    applySideWidth();
+    updateVeil();
     if (on) {
-      openChrome();
       applyWrap();
       if (!state.tree.length) loadTree();
       else renderTree();
       findSync();
     } else {
       showEditor(false);
-      if (!thread.querySelector(".msg.user, .msg.assistant")) closeChrome();
+      if (!state.settingsOn && !hasChat()) closeChrome();
     }
   }
 
@@ -819,7 +867,8 @@
   const COMMANDS = [
     { id: "new", hint: "New chat" },
     { id: "files", hint: "Workspace" },
-    { id: "settings", hint: "Folder, model, mode" },
+    { id: "settings", hint: "Provider, model, look" },
+    { id: "provider", hint: "Vercel, xAI, Ollama" },
     { id: "models", hint: "Switch model" },
     { id: "permissions", hint: "Ask, auto, yolo" },
     { id: "resume", hint: "Past sessions" },
@@ -1100,41 +1149,84 @@
       if (state.modelLabel) $("model-val").textContent = state.modelLabel;
       else $("model-val").textContent = modelName(state.model) || "—";
       paintDiagnostics(s);
+      paintHome();
     } catch {
       state.status = null;
       paintDiagnostics(null);
     }
   }
 
+  function paintHome() {
+    const p = (state.status && state.status.provider) || {};
+    const pv = $("provider-val");
+    if (pv) {
+      pv.textContent = p.label || state.providerLabel || "Vercel";
+      const need = !!(state.status && state.status.key === false && p.url);
+      pv.classList.toggle("warn", need);
+      if (need) pv.textContent = (p.label || "Provider") + " · key";
+    }
+    const mv = $("model-val");
+    if (mv) mv.textContent = state.modelLabel || modelName(state.model) || "—";
+    const hint = $("perm-hint");
+    if (hint) hint.textContent = PERM_HINT[state.perm] || "";
+    const sv = $("sessions-val");
+    if (sv) {
+      if (!state.workspace) sv.textContent = "—";
+      else if (!state.sessionCount) sv.textContent = "None";
+      else sv.textContent = String(state.sessionCount);
+    }
+  }
+
   function paintDiagnostics(s) {
-    const keyRow = $("key-row");
-    if (keyRow) keyRow.hidden = !s || s.key !== false;
     const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
     if (!s) {
       set("diag-backend", "unreachable");
       set("diag-model", "—");
+      set("diag-provider", "—");
+      set("diag-api", "—");
       set("diag-session", state.resume || "—");
       set("diag-docker", "—");
       set("diag-bins", "—");
+      paintHome();
       return;
     }
     set("diag-backend", s.backend || "—");
     set("diag-model", s.model || state.model || "—");
+    const p = s.provider || {};
+    set("diag-provider", p.url || p.label || "Vercel AI Gateway");
+    if (p.vercel || !p.url) {
+      set("diag-api", "Vercel");
+    } else if (p.api === "auto" && p.effective_api && p.effective_api !== p.api) {
+      set("diag-api", "auto → " + p.effective_api);
+    } else {
+      set("diag-api", p.effective_api || p.api || "—");
+    }
+    state.provider = p.id || "";
+    state.providerLabel = p.label || "";
+    state.api = p.api && p.api !== "vercel" ? p.api : "auto";
+    paintApi(p);
+    const urlRow = $("provider-url-row");
+    if (urlRow) {
+      urlRow.hidden = !p.url || p.id !== "custom";
+      if (p.url && $("provider-url")) $("provider-url").value = p.url;
+    }
+    const keyRow = $("key-row");
+    if (keyRow) keyRow.hidden = s.key !== false;
     set("diag-session", state.resume && state.resume !== "last" ? state.resume : "last");
     set("diag-docker", s.docker || "—");
     const bins = [];
     if (s.fx) bins.push("fx");
     if (s.fxs) bins.push("fxs");
     set("diag-bins", bins.join(" · ") || "none");
+    paintHome();
   }
 
   function flashCopy(id) {
     const el = $(id);
     if (!el) return;
-    const label = el.querySelector(".cell-k") || el;
-    const prev = label.textContent;
-    label.textContent = "Copied";
-    setTimeout(() => { label.textContent = prev; }, 900);
+    const prev = el.textContent;
+    el.textContent = "Copied";
+    setTimeout(() => { el.textContent = prev; }, 900);
   }
 
   async function copyText(text, ackId) {
@@ -1150,6 +1242,8 @@
       "fxs",
       "backend: " + (s.backend || "unknown"),
       "model: " + (s.model || state.model || "—"),
+      "provider: " + ((s.provider && (s.provider.url || s.provider.label)) || "—"),
+      "api: " + ((s.provider && (s.provider.effective_api || s.provider.api)) || "—"),
       "key: " + (s.key === true ? "set" : s.key === false ? "missing" : "—"),
       "workspace: " + (state.workspace || "—"),
       "session: " + (state.resume || "—"),
@@ -1201,10 +1295,6 @@
       if (i === q.length) return true;
     }
     return false;
-  }
-
-  function updateVeil() {
-    veil.hidden = !(mobile() && ((state.filesOn && !state.editing) || state.railOn));
   }
 
   const railTip = $("rail-tip");
@@ -1418,7 +1508,9 @@
   async function loadSessions() {
     sessionList.innerHTML = "";
     if (!state.workspace) {
+      state.sessionCount = 0;
       state.sessions = [];
+      paintHome();
       sessionList.innerHTML = "<li class='empty-note'>Open a folder first.</li>";
       renderRailList();
       return;
@@ -1426,22 +1518,23 @@
     try {
       const r = await fetch("/api/sessions?workspace=" + encodeURIComponent(state.workspace));
       const data = await r.json();
-      state.sessions = data.sessions || [];
-      if (!state.sessions.length) {
+      const sessions = data.sessions || [];
+      state.sessions = sessions;
+      state.sessionCount = sessions.length;
+      paintHome();
+      if (!sessions.length) {
         sessionList.innerHTML = "<li class='empty-note'>None yet.</li>";
       } else {
-        state.sessions.forEach((s) => {
-          const li = document.createElement("li");
-          const b = document.createElement("button");
-          b.type = "button";
-          b.innerHTML = esc(s.title || "Session") +
-            '<span class="id">' + esc(ago(s.mtime) + (s.id ? " · " + s.id.slice(0, 8) : "")) + "</span>";
-          b.addEventListener("click", () => {
-            openSession(s);
-            settings.close();
-          });
-          li.appendChild(b);
-          sessionList.appendChild(li);
+        sessions.forEach((s) => {
+          sessionList.appendChild(choiceItem({
+            title: s.title || "Session",
+            sub: ago(s.mtime) + (s.id ? " · " + s.id.slice(0, 8) : ""),
+            on: !!(s.id && s.id === state.resume),
+            onClick: () => {
+              openSession(s);
+              showSettings(false);
+            },
+          }));
         });
       }
     } catch {
@@ -1528,55 +1621,301 @@
   function openChrome() { morphChrome(true); }
   function closeChrome() { morphChrome(false); }
 
-  async function loadModels() {
-    const list = $("model-list");
-    list.innerHTML = "";
-    try {
-      const data = await (await fetch("/api/models")).json();
-      (data.models || []).forEach((m) => {
-        const id = m.id || m;
-        const li = document.createElement("li");
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = m.label || id;
-        b.classList.toggle("on", id === (data.current || state.model));
-        if (id === (data.current || state.model) && m.label) {
-          state.modelLabel = m.label;
-          $("model-val").textContent = m.label;
+  async function showSettings(on, opts) {
+    if (!on) {
+      hideSettings();
+      if (!state.filesOn && !hasChat()) closeChrome();
+      return;
+    }
+    if (state.filesOn) {
+      if (state.editing && !(await maybeSave())) return;
+      state.filesOn = false;
+      localStorage.setItem("fxs.filesOn", "0");
+      filesEl.hidden = true;
+      document.body.classList.remove("files-on");
+      $("files-btn").classList.remove("on");
+      $("files-btn").setAttribute("aria-expanded", "false");
+      showEditor(false);
+    }
+    state.settingsOn = true;
+    settings.hidden = false;
+    $("more").classList.add("on");
+    $("more").setAttribute("aria-expanded", "true");
+    applySideWidth();
+    updateVeil();
+    folderInput.value = state.workspace;
+    setPerm(state.perm);
+    applyTheme();
+    paintHome();
+    const page = opts && opts.page;
+    if (page) openPage(page);
+    else closePage();
+    loadModels();
+    loadSessions();
+    refreshStatus();
+    if (!page && !state.workspace) {
+      requestAnimationFrame(() => folderInput.focus());
+    }
+  }
+
+  function closePage() {
+    const was = state.settingsPage;
+    state.settingsPage = "";
+    settings.classList.remove("paging");
+    $("settings-home").inert = false;
+    $("settings-page").inert = true;
+    ["provider", "model", "sessions", "diag"].forEach((p) => {
+      const el = $("page-" + p);
+      if (el) el.hidden = true;
+    });
+    const rows = {
+      provider: "provider-row",
+      model: "model-row",
+      sessions: "sessions-row",
+      diag: "diag-row",
+    };
+    const row = was && $(rows[was]);
+    if (row && state.settingsOn) row.focus();
+  }
+
+  function openPage(id) {
+    if (!SET_PAGES[id]) return;
+    state.settingsPage = id;
+    settings.classList.add("paging");
+    $("settings-home").inert = true;
+    $("settings-page").inert = false;
+    $("settings-page-title").textContent = SET_PAGES[id];
+    ["provider", "model", "sessions", "diag"].forEach((p) => {
+      const el = $("page-" + p);
+      if (el) el.hidden = p !== id;
+    });
+    if (id === "provider") {
+      const known = (state.status && state.status.provider && state.status.provider.providers) || [];
+      paintProviders(known);
+      paintApi((state.status && state.status.provider) || {});
+    }
+    if (id === "model") {
+      const q = $("model-q");
+      if (q) q.value = "";
+      if (state.models.length) paintModelList("");
+      else loadModels();
+    }
+    if (id === "sessions") loadSessions();
+    requestAnimationFrame(() => {
+      if (id === "model") {
+        const q = $("model-q");
+        if (q) q.focus();
+      } else if (id === "provider") {
+        const keyRow = $("key-row");
+        if (keyRow && !keyRow.hidden && $("key-input")) $("key-input").focus();
+        else {
+          const on = $("provider-list") && $("provider-list").querySelector(".choice-row.on");
+          if (on) on.focus();
         }
-        b.addEventListener("click", async () => {
+      }
+    });
+  }
+
+  function choiceItem({ title, sub, on, onClick }) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "choice-row" + (on ? " on" : "");
+    const main = document.createElement("span");
+    main.className = "choice-main";
+    const t = document.createElement("span");
+    t.className = "choice-title";
+    t.textContent = title;
+    main.appendChild(t);
+    if (sub) {
+      const s = document.createElement("span");
+      s.className = "choice-sub";
+      s.textContent = sub;
+      main.appendChild(s);
+    }
+    b.appendChild(main);
+    const ck = document.createElement("span");
+    ck.className = "choice-check";
+    ck.innerHTML = STEP_ICO.ok;
+    ck.setAttribute("aria-hidden", "true");
+    b.appendChild(ck);
+    b.addEventListener("click", onClick);
+    li.appendChild(b);
+    return li;
+  }
+
+  function hostOf(url) {
+    try { return new URL(url).host; } catch { return url || ""; }
+  }
+
+  async function setProvider(id, url) {
+    const body = { provider: url || id };
+    const r = await fetch("/api/provider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    state.provider = data.id || id;
+    state.providerLabel = data.label || id;
+    if (data.model) {
+      state.model = data.model;
+      state.modelLabel = modelName(data.model) || data.model;
+    }
+    if (state.settingsPage === "provider") {
+      paintProviders(data.providers || []);
+    }
+    paintApi(data);
+    const keyRow = $("key-row");
+    const inp = $("key-input");
+    if (keyRow) keyRow.hidden = !data.needs_key;
+    if (data.needs_key && inp) {
+      keyRow && keyRow.scrollIntoView({ block: "nearest" });
+      inp.focus();
+    }
+    paintHome();
+    await loadModels();
+    await refreshStatus();
+    return data;
+  }
+
+  function paintApi(p) {
+    const row = $("api-row");
+    if (!row) return;
+    const vercel = !p || p.vercel || !p.url || p.api === "vercel";
+    row.hidden = vercel;
+    const mode = vercel || !p.api ? "auto" : p.api;
+    state.api = mode;
+    document.querySelectorAll("#api-seg [data-api]").forEach((b) => {
+      b.classList.toggle("on", b.getAttribute("data-api") === mode);
+    });
+    const hint = $("api-hint");
+    if (hint) {
+      if (vercel) hint.textContent = "";
+      else if (mode === "chat") hint.textContent = "Chat Completions";
+      else if (mode === "responses") hint.textContent = "Responses — reasoning and tools, not stored";
+      else if (p.effective_api === "responses") hint.textContent = "Auto — Responses on this host";
+      else hint.textContent = "Auto — Chat Completions on this host";
+    }
+  }
+
+  async function setApi(mode) {
+    const body = { api: mode };
+    if (state.provider === "custom") {
+      const url = $("provider-url") && $("provider-url").value.trim();
+      body.provider = url || state.providerLabel || "custom";
+    } else if (state.provider) {
+      body.provider = state.provider;
+    }
+    const r = await fetch("/api/provider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    paintApi(data);
+    await refreshStatus();
+    return data;
+  }
+
+  function paintProviders(list) {
+    const el = $("provider-list");
+    if (!el) return;
+    el.innerHTML = "";
+    (list || []).forEach((p) => {
+      el.appendChild(choiceItem({
+        title: p.label,
+        sub: p.url ? hostOf(p.url) : "Default",
+        on: p.id === state.provider || (!state.provider && p.id === "vercel"),
+        onClick: async (ev) => {
+          const btn = ev.currentTarget;
+          el.querySelectorAll(".choice-row").forEach((b) => b.classList.toggle("on", b === btn));
+          try {
+            await setProvider(p.id, p.url);
+          } catch (e) {
+            addMsg("sys", String(e.message || e));
+            const known = (state.status && state.status.provider && state.status.provider.providers) || list;
+            paintProviders(known);
+          }
+        },
+      }));
+    });
+    el.appendChild(choiceItem({
+      title: "Custom URL",
+      sub: "Any OpenAI-compatible /v1",
+      on: state.provider === "custom",
+      onClick: () => {
+        const row = $("provider-url-row");
+        if (row) row.hidden = false;
+        $("provider-url").focus();
+      },
+    }));
+    const selected = el.querySelector(".choice-row.on");
+    if (selected) selected.scrollIntoView({ block: "nearest" });
+  }
+
+  function paintModelList(query) {
+    const list = $("model-list");
+    if (!list) return;
+    list.innerHTML = "";
+    const q = (query || "").trim().toLowerCase();
+    const items = (state.models || []).filter((m) => {
+      const id = String(m.id || m);
+      const label = String(m.label || id);
+      if (!q) return true;
+      return id.toLowerCase().includes(q) || label.toLowerCase().includes(q);
+    });
+    if (!items.length) {
+      list.innerHTML = "<li class='empty-note'>" + (q ? "No matches." : "No models.") + "</li>";
+      return;
+    }
+    items.forEach((m) => {
+      const id = m.id || m;
+      const label = m.label || id;
+      list.appendChild(choiceItem({
+        title: label,
+        sub: label !== id ? id : "",
+        on: id === state.model,
+        onClick: async () => {
           await fetch("/api/model", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: id }),
           });
           state.model = id;
-          state.modelLabel = m.label || modelName(id);
-          $("model-val").textContent = state.modelLabel;
-          list.hidden = true;
-          loadModels();
-        });
-        li.appendChild(b);
-        list.appendChild(li);
-      });
+          state.modelLabel = label;
+          paintHome();
+          closePage();
+        },
+      }));
+    });
+    const selected = list.querySelector(".choice-row.on");
+    if (selected) selected.scrollIntoView({ block: "nearest" });
+  }
+
+  async function loadModels() {
+    try {
+      const data = await (await fetch("/api/models")).json();
+      state.models = data.models || [];
+      const current = data.current || state.model;
+      if (current) state.model = current;
+      const cur = state.models.find((m) => (m.id || m) === current);
+      if (cur && cur.label) state.modelLabel = cur.label;
+      paintHome();
+      if (state.settingsPage === "model") {
+        paintModelList(($("model-q") && $("model-q").value) || "");
+      }
     } catch {
-      list.innerHTML = "<li class='empty-note'>Could not load models.</li>";
+      if (state.settingsPage === "model") {
+        $("model-list").innerHTML = "<li class='empty-note'>Could not load models.</li>";
+      }
     }
   }
 
   async function openSettings(opts) {
-    folderInput.value = state.workspace;
-    $("model-list").hidden = true;
-    $("model-val").textContent = modelName(state.model) || "—";
-    setPerm(state.perm);
-    applyTheme();
-    const adv = $("advanced");
-    if (adv) adv.open = !!(opts && opts.advanced);
-    await loadModels();
-    await Promise.all([loadSessions(), refreshStatus()]);
-    if (!settings.open) settings.showModal();
-    if (opts && opts.advanced && adv) adv.scrollIntoView({ block: "nearest" });
-    else folderInput.focus();
+    showSettings(true, opts);
   }
 
   function commitFolder() {
@@ -1591,14 +1930,11 @@
   async function runCommand(id) {
     if (id === "clear" || id === "new") { newSession(); return; }
     if (id === "files") { showFiles(true); return; }
-    if (id === "resume") { showRail(true); return; }
     if (id === "settings") { openSettings(); return; }
-    if (id === "debug" || id === "advanced") { openSettings({ advanced: true }); return; }
-    if (id === "models") {
-      await openSettings();
-      $("model-list").hidden = false;
-      return;
-    }
+    if (id === "resume") { showRail(true); return; }
+    if (id === "debug" || id === "advanced") { openSettings({ page: "diag" }); return; }
+    if (id === "models") { openSettings({ page: "model" }); return; }
+    if (id === "provider") { openSettings({ page: "provider" }); return; }
     if (id === "permissions") {
       setPerm(PERMS[(PERMS.indexOf(state.perm) + 1) % PERMS.length]);
       addMsg("sys", state.perm);
@@ -1706,7 +2042,7 @@
             loadSessions();
           } else if (ev.type === "model" && ev.id) {
             state.model = ev.id;
-            $("model-val").textContent = modelName(ev.id);
+            paintHome();
           } else if (ev.type === "error") {
             failed = true;
             bot.hidden = false;
@@ -1801,7 +2137,8 @@
   document.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (e.key === "Escape") {
-      if (settings.open) { settings.close(); return; }
+      if (state.settingsPage) { closePage(); return; }
+      if (state.settingsOn) { showSettings(false); return; }
       if (pal.open) { hidePalette(); return; }
       if (railMenu && !railMenu.hidden) { hideRailMenu(); return; }
       if (state.editing) { closeEditor(); return; }
@@ -1822,13 +2159,14 @@
     }
     if (mod && e.key === ",") {
       e.preventDefault();
-      openSettings();
+      if (state.settingsOn) showSettings(false);
+      else openSettings();
     }
     if (!mod && e.key === "?" && !e.repeat) {
       const tag = (document.activeElement && document.activeElement.tagName) || "";
       if (tag !== "INPUT" && tag !== "TEXTAREA") {
         e.preventDefault();
-        openSettings({ advanced: true });
+        openSettings({ page: "diag" });
       }
     }
     if (mod && e.key.toLowerCase() === "n") {
@@ -1861,7 +2199,7 @@
     }
     if (!mod && state.filesOn && !state.editing && document.activeElement !== promptEl &&
         document.activeElement !== treeQ && document.activeElement !== folderInput &&
-        document.activeElement !== edBody) {
+        document.activeElement !== edBody && !state.settingsOn) {
       const items = [...treeEl.querySelectorAll(".tree-item")];
       if (!items.length) return;
       const idx = items.findIndex((el) => el.dataset.path === state.treeCursor);
@@ -1899,7 +2237,10 @@
     if (path) openFile(path);
   });
 
-  $("more").addEventListener("click", () => openSettings());
+  $("more").addEventListener("click", () => {
+    if (state.settingsOn) showSettings(false);
+    else openSettings();
+  });
   $("new-btn").addEventListener("click", newSession);
   $("rail-new").addEventListener("click", newSession);
   $("rail-toggle").addEventListener("click", toggleRail);
@@ -1912,13 +2253,31 @@
   $("rail-close").addEventListener("click", () => showRail(false));
   $("files-btn").addEventListener("click", toggleFiles);
   $("files-close").addEventListener("click", () => showFiles(false));
-  $("settings-close").addEventListener("click", () => settings.close());
+  $("settings-close").addEventListener("click", () => showSettings(false));
+  $("settings-page-close").addEventListener("click", () => showSettings(false));
+  $("settings-back").addEventListener("click", () => closePage());
+  $("provider-row").addEventListener("click", () => openPage("provider"));
+  $("model-row").addEventListener("click", () => openPage("model"));
+  $("sessions-row").addEventListener("click", () => openPage("sessions"));
+  $("diag-row").addEventListener("click", () => openPage("diag"));
+  const modelQ = $("model-q");
+  if (modelQ) {
+    modelQ.addEventListener("input", () => paintModelList(modelQ.value));
+    modelQ.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown") return;
+      const first = $("model-list") && $("model-list").querySelector(".choice-row");
+      if (!first) return;
+      e.preventDefault();
+      first.focus();
+    });
+  }
   const copyDiag = $("copy-diag");
   if (copyDiag) copyDiag.addEventListener("click", () => copyText(diagnosticsText(), "copy-diag"));
   const copyChat = $("copy-chat");
   if (copyChat) copyChat.addEventListener("click", () => copyText(chatText() || "No chat yet.", "copy-chat"));
   veil.addEventListener("click", () => {
-    if (state.filesOn) showFiles(false);
+    if (state.settingsOn) showSettings(false);
+    else if (state.filesOn) showFiles(false);
     if (state.railOn && mobile()) showRail(false);
   });
   $("sessions-btn").addEventListener("mouseenter", () => showRailTip($("sessions-btn")));
@@ -2032,7 +2391,6 @@
       edGutter.scrollTop = edBody.scrollTop;
     }).observe(edBody);
   }
-  window.addEventListener("resize", updateVeil);
   edBody.addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
       e.preventDefault();
@@ -2062,10 +2420,54 @@
   folderInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); commitFolder(); }
   });
-  $("model-row").addEventListener("click", () => {
-    const list = $("model-list");
-    list.hidden = !list.hidden;
+  $("provider-url").addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const url = $("provider-url").value.trim();
+    if (!url) return;
+    try {
+      await setProvider("custom", url);
+      const known = (state.status && state.status.provider && state.status.provider.providers) || [];
+      paintProviders(known);
+    } catch (err) {
+      addMsg("sys", String(err.message || err));
+    }
   });
+  const keyInput = $("key-input");
+  if (keyInput) {
+    keyInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const key = keyInput.value.trim();
+      if (!key) return;
+      try {
+        const r = await fetch("/api/key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        keyInput.value = "";
+        await loadModels();
+        await refreshStatus();
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const apiSeg = $("api-seg");
+  if (apiSeg) {
+    apiSeg.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-api]");
+      if (!b) return;
+      try {
+        await setApi(b.getAttribute("data-api"));
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
   $("perm-seg").addEventListener("click", (e) => {
     const b = e.target.closest("[data-perm]");
     if (b) setPerm(b.getAttribute("data-perm"));
@@ -2074,12 +2476,11 @@
     const b = e.target.closest("[data-theme]");
     if (b) { state.theme = b.getAttribute("data-theme"); applyTheme(); }
   });
-  settings.addEventListener("close", commitFolder);
 
-  (function splitHandle() {
+  function bindSplit(el) {
     const h = document.createElement("div");
     h.className = "split";
-    filesEl.appendChild(h);
+    el.appendChild(h);
     let startX = 0, startW = 0, down = false;
     h.addEventListener("pointerdown", (e) => {
       down = true;
@@ -2091,7 +2492,7 @@
     h.addEventListener("pointermove", (e) => {
       if (!down) return;
       state.filesW = clampW(startW + (startX - e.clientX));
-      filesEl.style.setProperty("--files-w", state.filesW + "px");
+      applySideWidth();
     });
     function end() {
       if (!down) return;
@@ -2100,13 +2501,34 @@
     }
     h.addEventListener("pointerup", end);
     h.addEventListener("pointercancel", end);
-  })();
+  }
+  bindSplit(filesEl);
+  bindSplit(settings);
+
+  function bindChoiceNav(id) {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const rows = [...el.querySelectorAll(".choice-row")];
+      if (!rows.length) return;
+      e.preventDefault();
+      const i = rows.indexOf(document.activeElement);
+      const next = e.key === "ArrowDown"
+        ? rows[i < 0 ? 0 : Math.min(rows.length - 1, i + 1)]
+        : rows[i < 0 ? rows.length - 1 : Math.max(0, i - 1)];
+      next.focus();
+    });
+  }
+  bindChoiceNav("provider-list");
+  bindChoiceNav("model-list");
+  bindChoiceNav("session-list");
 
   applyTheme();
   setPerm(state.perm);
   setWorkspace(state.workspace);
   applyWrap();
-  filesEl.style.setProperty("--files-w", state.filesW + "px");
+  applySideWidth();
   grow();
   refreshStatus();
   if (mobile()) showFiles(false);
@@ -2116,12 +2538,14 @@
     if (mobile()) {
       if (state.railOn) showRail(false);
       if (state.filesOn) showFiles(false);
+      if (state.settingsOn) showSettings(false);
     } else {
       if (localStorage.getItem("fxs.filesOn") === "1") showFiles(true);
       showRail(localStorage.getItem("fxs.railOn") === "1");
     }
     updateVeil();
   });
+  window.addEventListener("resize", updateVeil);
   promptEl.focus();
   const brand = $("brand");
   if (brand) {

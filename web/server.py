@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import gateway
 HOST = os.environ.get("FXS_UI_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FXS_UI_PORT", "8787"))
 MODEL = os.environ.get("FX_MODEL", "zai/glm-5.2")
@@ -116,6 +118,17 @@ MODEL = os.environ.get("FX_MODEL", MODEL)
 if MODEL == "zai/glm-5.2-fast":
     MODEL = "zai/glm-5.2"
     os.environ["FX_MODEL"] = MODEL
+
+
+def boot_gateway() -> None:
+    if local_mode():
+        return
+    if not gateway.configured_upstream():
+        return
+    try:
+        gateway.ensure_gateway()
+    except Exception as e:
+        sys.stderr.write(f"fxs-ui: gateway: {e}\n")
 
 
 def shorten(s: str, n: int = 72) -> str:
@@ -264,15 +277,7 @@ def default_workspace() -> str:
 
 
 def has_key() -> bool:
-    if os.environ.get("AI_GATEWAY_API_KEY", "").startswith("vck_"):
-        return True
-    p = HOME / ".fx" / "api-key"
-    if p.is_file():
-        try:
-            return p.read_text(encoding="utf-8").strip().startswith("vck_")
-        except OSError:
-            return False
-    return False
+    return bool(gateway.current_provider().get("key"))
 
 
 def docker_state() -> str:
@@ -639,7 +644,11 @@ def parse_models(text: str) -> list[dict]:
             if not line:
                 continue
             mid = line.split()[0].strip("-*·")
-            if "/" in mid and len(mid) < 80:
+            if not mid or len(mid) > 120:
+                continue
+            if mid.lower() in ("default", "models", "id", "name", "model"):
+                continue
+            if "/" in mid or re.match(r"^[A-Za-z0-9_.:-]+$", mid):
                 found.append({"id": mid, "label": mid.split("/")[-1]})
     seen = set()
     out = []
@@ -664,7 +673,7 @@ def rank_models(found: list[dict], current: str) -> list[dict]:
             m = by_id.pop(pid)
             label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), m.get("label") or pid.split("/")[-1])
             out.append({"id": pid, "label": label})
-        elif pid == current or pid == "zai/glm-5.2":
+        elif pid == current:
             label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), pid.split("/")[-1])
             out.append({"id": pid, "label": label})
     for m in found:
@@ -760,6 +769,7 @@ class Handler(BaseHTTPRequestHandler):
                 "fxs": bool(which("fxs") or which("run-fx")),
                 "fx": bool(which("fx")),
                 "backend": backend_name(),
+                "provider": gateway.current_provider(),
             })
             return
         if u.path == "/api/sessions":
@@ -883,6 +893,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/model":
             self._set_model(payload)
             return
+        if u.path == "/api/provider":
+            self._set_provider(payload)
+            return
+        if u.path == "/api/key":
+            self._set_key(payload)
+            return
         if u.path == "/api/file":
             try:
                 ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
@@ -912,33 +928,88 @@ class Handler(BaseHTTPRequestHandler):
 
     def _models(self) -> None:
         if local_mode():
+            prov = gateway.current_provider()
+            if not prov.get("vercel"):
+                mid = MODEL or prov.get("model") or ""
+                self._json(200, {
+                    "models": [{"id": mid, "label": mid.split("/")[-1]}] if mid else [],
+                    "current": MODEL,
+                })
+                return
             self._json(200, {"models": CATALOG_MODELS, "current": MODEL})
             return
         ws = default_workspace() or os.getcwd()
         models: list[dict] = []
         try:
-            ws = workspace_ok(ws)
-            r = run_fxs(ws, ["models", "--json"], timeout=60)
-            models = parse_models((r.stdout or "") + "\n" + (r.stderr or ""))
+            if gateway.configured_upstream():
+                gateway.ensure_gateway()
+                ids = gateway.fetch_catalog()
+                models = [{"id": i, "label": i.split("/")[-1]} for i in ids]
             if not models:
-                r2 = run_fxs(ws, ["models"], timeout=60)
-                models = parse_models((r2.stdout or "") + "\n" + (r2.stderr or ""))
+                ws = workspace_ok(ws)
+                r = run_fxs(ws, ["models", "--json"], timeout=60)
+                models = parse_models((r.stdout or "") + "\n" + (r.stderr or ""))
+                if not models:
+                    r2 = run_fxs(ws, ["models"], timeout=60)
+                    models = parse_models((r2.stdout or "") + "\n" + (r2.stderr or ""))
         except Exception:
             models = []
-        models = rank_models(models or list(CATALOG_MODELS), MODEL)
+        vercel = gateway.current_provider().get("vercel", True)
+        fallback = list(CATALOG_MODELS) if vercel else (
+            [{"id": MODEL, "label": MODEL.split("/")[-1]}] if MODEL else []
+        )
+        models = rank_models(models or fallback, MODEL)
         if not models:
-            models = list(CATALOG_MODELS)
+            models = fallback
         self._json(200, {"models": models, "current": MODEL})
 
     def _set_model(self, payload: dict) -> None:
         global MODEL
         mid = str(payload.get("model") or "").strip()
-        if not mid or "/" not in mid or len(mid) > 80:
+        if not mid or len(mid) > 120 or any(c in mid for c in " \n\t"):
             self._json(400, {"error": "bad model"})
             return
         MODEL = mid
         os.environ["FX_MODEL"] = mid
+        try:
+            gateway.upsert_env({"FX_MODEL": mid})
+        except OSError:
+            pass
         self._json(200, {"model": MODEL})
+
+    def _set_provider(self, payload: dict) -> None:
+        name = str(payload.get("provider") or payload.get("url") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        api = str(payload.get("api") or "").strip()
+        if not name:
+            if api:
+                cur = gateway.current_provider()
+                name = cur.get("url") or cur.get("id") or "vercel"
+            else:
+                self._json(200, gateway.current_provider())
+                return
+        try:
+            info = gateway.apply_provider(name, model, api=api)
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+            return
+        global MODEL
+        if model:
+            MODEL = model
+        elif info.get("model"):
+            MODEL = info["model"]
+        if MODEL:
+            os.environ["FX_MODEL"] = MODEL
+        self._json(200, info)
+
+    def _set_key(self, payload: dict) -> None:
+        key = str(payload.get("key") or "").strip()
+        try:
+            info = gateway.store_api_key(key)
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+            return
+        self._json(200, {"ok": True, "key": bool(info.get("key")), "provider": info.get("id")})
 
     def _fx(self, payload: dict) -> None:
         args = payload.get("args")
@@ -1206,6 +1277,7 @@ def pick_host_port() -> tuple[str, int]:
 
 def main() -> None:
     host, port = pick_host_port()
+    boot_gateway()
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}"

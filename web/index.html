@@ -95,7 +95,7 @@
           <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
       </button>
-      <button type="button" id="more" class="icon" aria-label="Settings" title="Settings ⌘,">
+      <button type="button" id="more" class="icon" aria-label="Settings" title="Settings ⌘," aria-expanded="false">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           <circle cx="6" cy="4.5" r="1.4" fill="currentColor"/>
@@ -200,93 +200,177 @@
     </div>
   </aside>
 
-  <dialog id="settings" class="sheet">
-    <div class="sheet-head">
-      <h2>Settings</h2>
-      <button type="button" class="icon" id="settings-close" aria-label="Close">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-        </svg>
-      </button>
+  <aside id="settings" class="files settings" hidden>
+    <div class="files-view">
+      <div id="settings-stack" class="files-stack">
+        <section class="pane" id="settings-home" aria-label="Settings">
+          <header class="pane-bar">
+            <span class="pane-title">Settings</span>
+            <button type="button" class="icon files-close" id="settings-close" aria-label="Close settings" title="Close">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </header>
+          <div class="settings-body">
+            <div class="set-group">
+              <div class="set-stack">
+                <span class="set-k" id="folder-label">Folder</span>
+                <label class="set-field">
+                  <span class="vh">Folder</span>
+                  <input id="folder-input" type="text" spellcheck="false" placeholder="Folder the agent can see" autocomplete="off" aria-labelledby="folder-label">
+                </label>
+              </div>
+            </div>
+
+            <div class="set-group">
+              <button type="button" class="set-row" id="provider-row" data-go>
+                <span class="set-k">Provider</span>
+                <span class="set-v" id="provider-val">Vercel</span>
+              </button>
+              <button type="button" class="set-row" id="model-row" data-go>
+                <span class="set-k">Model</span>
+                <span class="set-v" id="model-val">GLM 5.2</span>
+              </button>
+              <div class="set-stack">
+                <span class="set-k">Permissions</span>
+                <div class="seg fill" id="perm-seg" role="radiogroup" aria-label="Permissions">
+                  <button type="button" data-perm="ask" title="Prompt before tools">Ask</button>
+                  <button type="button" data-perm="auto" title="Allow reads">Auto</button>
+                  <button type="button" data-perm="yolo" title="Allow all tools">Yolo</button>
+                </div>
+                <p class="set-hint" id="perm-hint"></p>
+              </div>
+            </div>
+
+            <div class="set-group">
+              <div class="set-stack">
+                <span class="set-k">Appearance</span>
+                <div class="seg fill" id="theme-seg" role="radiogroup" aria-label="Appearance">
+                  <button type="button" data-theme="system">System</button>
+                  <button type="button" data-theme="light">Light</button>
+                  <button type="button" data-theme="dark">Dark</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="set-group">
+              <button type="button" class="set-row" id="sessions-row" data-go>
+                <span class="set-k">Sessions</span>
+                <span class="set-v" id="sessions-val">—</span>
+              </button>
+              <button type="button" class="set-row" id="diag-row" data-go>
+                <span class="set-k">Diagnostics</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" id="settings-page" aria-label="Settings page" inert>
+          <header class="pane-bar">
+            <button type="button" class="icon" id="settings-back" aria-label="Back" title="Back">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M10 3.5 4.5 8 10 12.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <span class="pane-title" id="settings-page-title"></span>
+            <button type="button" class="icon files-close" id="settings-page-close" aria-label="Close settings" title="Close">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </header>
+          <div class="settings-body">
+            <div id="page-provider" hidden>
+              <div class="set-group" id="provider-tools">
+                <div class="set-stack" id="api-row" hidden>
+                  <span class="set-k">Protocol</span>
+                  <div class="seg fill" id="api-seg" role="radiogroup" aria-label="API">
+                    <button type="button" data-api="auto" title="Responses on OpenAI and xAI, Chat elsewhere">Auto</button>
+                    <button type="button" data-api="chat" title="Chat Completions">Chat</button>
+                    <button type="button" data-api="responses" title="Responses — reasoning and tool items">Responses</button>
+                  </div>
+                  <p class="set-hint" id="api-hint"></p>
+                </div>
+                <div class="set-stack" id="key-row" hidden>
+                  <span class="set-k">API key</span>
+                  <label class="set-field">
+                    <span class="vh">API key</span>
+                    <input id="key-input" type="password" spellcheck="false" autocomplete="off" placeholder="vck_… or sk-… / xai-…">
+                  </label>
+                  <p class="set-hint">Enter to save. Kept on this machine, not in the project.</p>
+                </div>
+                <div class="set-stack" id="provider-url-row" hidden>
+                  <span class="set-k">Custom URL</span>
+                  <label class="set-field">
+                    <span class="vh">Upstream</span>
+                    <input id="provider-url" type="text" spellcheck="false" placeholder="https://host/v1" autocomplete="off">
+                  </label>
+                </div>
+              </div>
+              <ul id="provider-list" class="choice"></ul>
+            </div>
+            <div id="page-model" hidden>
+              <label class="set-field sticky">
+                <span class="vh">Filter models</span>
+                <input id="model-q" type="search" placeholder="Filter models" autocomplete="off" spellcheck="false">
+              </label>
+              <ul id="model-list" class="choice"></ul>
+            </div>
+            <div id="page-sessions" hidden>
+              <ul id="session-list" class="choice"></ul>
+            </div>
+            <div id="page-diag" hidden>
+              <div class="set-group">
+                <div class="set-row static">
+                  <span class="set-k">Backend</span>
+                  <span class="set-v" id="diag-backend"></span>
+                </div>
+                <div class="set-row static">
+                  <span class="set-k">Provider</span>
+                  <span class="set-v mono" id="diag-provider"></span>
+                </div>
+                <div class="set-row static">
+                  <span class="set-k">Protocol</span>
+                  <span class="set-v mono" id="diag-api"></span>
+                </div>
+                <div class="set-row static">
+                  <span class="set-k">Model</span>
+                  <span class="set-v mono" id="diag-model"></span>
+                </div>
+                <div class="set-row static">
+                  <span class="set-k">Session</span>
+                  <span class="set-v mono" id="diag-session"></span>
+                </div>
+                <div class="set-row static">
+                  <span class="set-k">Docker</span>
+                  <span class="set-v" id="diag-docker"></span>
+                </div>
+                <div class="set-row static">
+                  <span class="set-k">Binaries</span>
+                  <span class="set-v" id="diag-bins"></span>
+                </div>
+              </div>
+              <div class="set-group">
+                <button type="button" class="set-action" id="copy-diag">Copy diagnostics</button>
+                <button type="button" class="set-action" id="copy-chat">Copy chat</button>
+              </div>
+              <ul class="keys">
+                <li><span class="kbd">⌘N</span> New chat</li>
+                <li><span class="kbd">⌘B</span> Files</li>
+                <li><span class="kbd">⌘P</span> Filter files</li>
+                <li><span class="kbd">⌘,</span> Settings</li>
+                <li><span class="kbd">⌘S</span> Save</li>
+                <li><span class="kbd">/</span> Commands</li>
+                <li><span class="kbd">@</span> Mention a file</li>
+                <li><span class="kbd">?</span> Diagnostics</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
-
-    <section class="group">
-      <label class="cell stack">
-        <span class="cell-k">Folder</span>
-        <input id="folder-input" type="text" spellcheck="false" placeholder="Folder" autocomplete="off">
-      </label>
-      <button type="button" class="cell" id="model-row">
-        <span class="cell-k">Model</span>
-        <span class="cell-v" id="model-val">GLM 5.2</span>
-      </button>
-      <ul id="model-list" class="pick" hidden></ul>
-      <div class="cell">
-        <span class="cell-k">Permissions</span>
-        <div class="seg" id="perm-seg" role="radiogroup" aria-label="Permissions">
-          <button type="button" data-perm="ask" title="Prompt before tools">Ask</button>
-          <button type="button" data-perm="auto" title="Allow reads">Auto</button>
-          <button type="button" data-perm="yolo" title="Allow all tools">Yolo</button>
-        </div>
-      </div>
-      <div class="cell">
-        <span class="cell-k">Appearance</span>
-        <div class="seg" id="theme-seg" role="radiogroup" aria-label="Appearance">
-          <button type="button" data-theme="system">System</button>
-          <button type="button" data-theme="light">Light</button>
-          <button type="button" data-theme="dark">Dark</button>
-        </div>
-      </div>
-      <div class="cell" id="key-row" hidden>
-        <span class="cell-k">Gateway key</span>
-        <span class="cell-v warn">Missing</span>
-      </div>
-    </section>
-
-    <section class="group">
-      <h3>Sessions</h3>
-      <ul id="session-list"></ul>
-    </section>
-
-    <details class="group advanced" id="advanced">
-      <summary>Advanced</summary>
-      <div class="cell">
-        <span class="cell-k">Backend</span>
-        <span class="cell-v" id="diag-backend"></span>
-      </div>
-      <div class="cell">
-        <span class="cell-k">Model id</span>
-        <span class="cell-v mono" id="diag-model"></span>
-      </div>
-      <div class="cell">
-        <span class="cell-k">Session</span>
-        <span class="cell-v mono" id="diag-session"></span>
-      </div>
-      <div class="cell">
-        <span class="cell-k">Docker</span>
-        <span class="cell-v" id="diag-docker"></span>
-      </div>
-      <div class="cell">
-        <span class="cell-k">Binaries</span>
-        <span class="cell-v" id="diag-bins"></span>
-      </div>
-      <button type="button" class="cell" id="copy-diag">
-        <span class="cell-k">Copy diagnostics</span>
-      </button>
-      <button type="button" class="cell" id="copy-chat">
-        <span class="cell-k">Copy chat</span>
-      </button>
-      <p class="hint-row">
-        <span class="kbd">⌘N</span> new
-        · <span class="kbd">⌘B</span> files
-        · <span class="kbd">⌘P</span> filter
-        · <span class="kbd">⌘,</span> settings
-        · <span class="kbd">⌘S</span> save
-        · <span class="kbd">/</span> commands
-        · <span class="kbd">@</span> files
-        · <span class="kbd">?</span> advanced
-      </p>
-    </details>
-  </dialog>
+  </aside>
 
   <div id="rail-tip" class="rail-tip" hidden></div>
   <div id="rail-menu" class="rail-menu" hidden>

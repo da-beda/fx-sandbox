@@ -42,7 +42,7 @@ RUN set -eu; \
     fi; \
     apt-get update -y; \
     apt-get install -y --no-install-recommends \
-      passwd ca-certificates curl tar gzip git bash; \
+      passwd ca-certificates curl tar gzip git bash python3; \
     rm -rf /var/lib/apt/lists/*; \
     if ! getent group fx >/dev/null; then \
       /usr/sbin/groupadd --gid "${FX_GID}" fx 2>/dev/null || /usr/sbin/groupadd fx; \
@@ -85,8 +85,9 @@ RUN set -eu; \
 COPY entrypoint.sh /usr/local/bin/fx-entrypoint
 COPY config/settings.json /usr/local/share/fx-sandbox/settings.json
 COPY config/workspace.fx.json /usr/local/share/fx-sandbox/workspace.fx.json
+COPY web/gateway.py /usr/local/share/fx-sandbox/gateway.py
 
-RUN chmod 0755 /usr/local/bin/fx-entrypoint \
+RUN chmod 0755 /usr/local/bin/fx-entrypoint /usr/local/share/fx-sandbox/gateway.py \
  && install -m 0600 -o fx -g fx /usr/local/share/fx-sandbox/settings.json /home/fx/.fx/settings.json \
  && printf "export FX_DISABLE_KEYCHAIN=1\\nexport FX_MODEL=%s\\n" "${FX_MODEL}" > /etc/profile.d/fx.sh \
  && chmod 0644 /etc/profile.d/fx.sh
