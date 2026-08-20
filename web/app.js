@@ -3,7 +3,6 @@
   const thread = $("thread");
   const promptEl = $("prompt");
   const sendBtn = $("send");
-  const projectName = $("project-name");
   const settings = $("settings");
   const folderInput = $("folder-input");
   const sessionList = $("session-list");
@@ -103,8 +102,7 @@
   function setWorkspace(p) {
     state.workspace = (p || "").trim();
     if (state.workspace) localStorage.setItem("fxs.workspace", state.workspace);
-    projectName.textContent = basename(state.workspace);
-    $("project").title = state.workspace || "Folder";
+    document.title = basename(state.workspace) || "fxs";
     folderInput.value = state.workspace;
     if (state.filesOn) loadTree();
   }
@@ -1047,7 +1045,6 @@
     if (path) openFile(path);
   });
 
-  $("project").addEventListener("click", openSettings);
   $("more").addEventListener("click", openSettings);
   $("new-btn").addEventListener("click", newSession);
   $("files-btn").addEventListener("click", toggleFiles);
