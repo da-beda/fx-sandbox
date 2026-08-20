@@ -26,6 +26,8 @@
   --fast: 250ms;
   --measure: 42rem;
   --logo-shimmer: #ffffffd9;
+  --open: 460ms;
+  --open-ease: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -80,8 +82,12 @@ html, body { height: 100%; }
 body {
   margin: 0;
   display: grid;
-  grid-template-rows: auto 1fr auto;
   grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "top files"
+    "stage files"
+    "dock files";
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font);
@@ -91,7 +97,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-.top, .stage, .dock { grid-column: 1; }
+.top { grid-area: top; }
+.stage { grid-area: stage; }
+.dock { grid-area: dock; }
 
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 button:disabled { opacity: 0.38; cursor: default; }
@@ -106,17 +114,38 @@ textarea, input {
 
 .top {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  padding: 8px 10px 6px;
+  padding: 8px 12px 6px;
   padding-top: max(8px, env(safe-area-inset-top));
   max-width: var(--measure);
   width: 100%;
   margin-inline: auto;
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+.brand {
+  display: grid;
+  width: 48px;
+  height: 35px;
+  padding: 0;
+  color: var(--fg);
+  flex-shrink: 0;
+  transform-origin: 0 0;
+  cursor: default;
+}
+.brand .mark {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+  color: inherit;
 }
 .actions {
   display: flex;
   gap: 2px;
+  margin-left: auto;
 }
 .icon {
   width: 36px;
@@ -137,28 +166,8 @@ textarea, input {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-.blank {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 18px;
-  pointer-events: none;
-  user-select: none;
-  color: var(--muted);
-  font-size: 17px;
-  font-weight: 400;
-  letter-spacing: -0.022em;
-  padding-bottom: 8vh;
-}
-.blank .mark {
-  color: var(--fg);
-  display: block;
-  width: 110px;
-  height: 80px;
-  overflow: visible;
+  opacity: 1;
+  transition: opacity 280ms 60ms var(--ease);
 }
 .shine-stop { stop-color: var(--logo-shimmer); }
 .shimmer-band {
@@ -175,11 +184,46 @@ textarea, input {
   15%, 85% { opacity: 1; }
   100% { opacity: 0; transform: translate(220%); }
 }
+
+body.welcome {
+  grid-template-rows: 1fr auto 1fr;
+  grid-template-areas:
+    "top files"
+    "dock files"
+    "stage files";
+}
+body.welcome .top {
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 22px;
+}
+body.welcome .actions {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: 12px;
+  margin: 0;
+}
+body.welcome .brand {
+  width: 154px;
+  height: 111px;
+}
+body.welcome .stage {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--ease);
+}
+body.welcome .composer {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fg) 3%, transparent),
+    0 10px 40px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .shimmer-band,
   .shimmer-band.is-playing { animation: none; }
+  .stage { transition: none; }
 }
-.blank[hidden] { display: none; }
 
 .thread {
   overflow: auto;
@@ -514,6 +558,8 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   .send { width: 36px; height: 36px; }
   .dock { padding-inline: 12px; }
   .thread { padding-inline: 16px; }
+  body.welcome .brand { width: 132px; height: 96px; }
+  body.welcome .top { padding-bottom: 18px; }
 }
 
 :focus-visible {
@@ -542,8 +588,7 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
 .veil[hidden] { display: none; }
 
 .files {
-  grid-column: 2;
-  grid-row: 1 / -1;
+  grid-area: files;
   width: var(--files-w, 340px);
   min-width: 280px;
   max-width: 560px;
