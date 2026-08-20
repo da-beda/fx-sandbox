@@ -718,6 +718,7 @@ FLAGS
   --image NAME           default fx-sandbox:latest
   --allow-yolo           Yolo (default). Same as FXS_YOLO=1
   --no-yolo              Ask before tools (fx auto/ask)
+  --perm ask|auto|yolo   Permission mode (default yolo)
   --dry-run              Print the docker argv and exit
   -h, --help
 
@@ -831,7 +832,15 @@ while [[ $# -gt 0 ]]; do
     --image) IMAGE="$2"; shift 2 ;;
     --pull) PULL=1; shift ;;
     --allow-yolo) ALLOW_YOLO=1; shift ;;
-    --no-yolo|--ask) ALLOW_YOLO=0; shift ;;
+    --no-yolo|--ask) ALLOW_YOLO=0; FX_PERMISSION_MODE="${FX_PERMISSION_MODE:-auto}"; shift ;;
+    --perm)
+      [[ $# -ge 2 ]] || die "--perm is ask, auto, or yolo"
+      case "$2" in
+        ask|auto) ALLOW_YOLO=0; FX_PERMISSION_MODE="$2"; shift 2 ;;
+        yolo) ALLOW_YOLO=1; FX_PERMISSION_MODE=yolo; shift 2 ;;
+        *) die "--perm is ask, auto, or yolo" ;;
+      esac
+      ;;
     --dry-run) DRY=1; shift ;;
     --) shift; FX_ARGS+=("$@"); break ;;
     --yolo)

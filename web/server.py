@@ -34,6 +34,21 @@ DANGEROUS = {
 PROC_LOCK = threading.Lock()
 CURRENT: dict = {"proc": None}
 
+SKIP_DIRS = {
+    ".git", "node_modules", ".venv", "dist", "target", "__pycache__",
+    ".fx", ".next", "vendor",
+}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+SAFE_FX = {
+    "models", "usage", "credits", "balance", "permissions", "status",
+    "doctor", "sessions", "workspace", "help", "version",
+}
+DEMO_MODELS = [
+    {"id": "zai/glm-5.2", "label": "GLM 5.2"},
+    {"id": "anthropic/claude-sonnet-4.6", "label": "Sonnet 4.6"},
+    {"id": "openai/gpt-5.2", "label": "GPT-5.2"},
+]
+
 
 def load_env_file() -> None:
     if not ENV_FILE.is_file():
@@ -149,6 +164,122 @@ def list_sessions(ws: str) -> list[dict]:
     return out[:40]
 
 
+def fuzzy_score(query: str, text: str) -> int:
+    q = (query or "").lower()
+    t = (text or "").lower()
+    if not q:
+        return 1
+    if q in t:
+        return 2000 - t.find(q) - (len(t) - len(q))
+    i = 0
+    score = 0
+    last = -2
+    for j, ch in enumerate(t):
+        if i < len(q) and ch == q[i]:
+            score += 6 if j == last + 1 else 1
+            if j == 0 or t[j - 1] in "/-._ ":
+                score += 10
+            last = j
+            i += 1
+    return score if i == len(q) else 0
+
+
+def list_files(ws: str, query: str) -> list[str]:
+    scored: list[tuple[int, str]] = []
+    root = Path(ws)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        rel_dir = os.path.relpath(dirpath, root)
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+            rel = rel.replace("\\", "/")
+            s = fuzzy_score(query, rel)
+            if query and s <= 0:
+                continue
+            scored.append((s, rel))
+            if len(scored) >= 400:
+                break
+        if len(scored) >= 400:
+            break
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [p for _, p in scored[:40]]
+
+
+def extract_json(text: str):
+    text = (text or "").strip()
+    if not text:
+        return None
+    for start in (text.rfind("{"), text.find("{")):
+        if start < 0:
+            continue
+        try:
+            return json.loads(text[start:])
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def fxs_bin() -> str | None:
+    return which("fxs") or which("run-fx")
+
+
+def clean_perm(raw) -> str:
+    p = str(raw or "yolo")
+    return p if p in ("ask", "auto", "yolo") else "yolo"
+
+
+def run_fxs(ws: str, fx_args: list[str], perm: str = "yolo", timeout: int = 90) -> subprocess.CompletedProcess:
+    bin_ = fxs_bin()
+    if not bin_:
+        raise FileNotFoundError("fxs is not on PATH")
+    cmd = [bin_, "run", "-w", ws]
+    if perm != "yolo":
+        cmd.append("--no-yolo")
+    cmd += ["--perm", perm, "--"] + fx_args
+    env = os.environ.copy()
+    env["FX_MODEL"] = MODEL
+    env["FX_PERMISSION_MODE"] = perm
+    return subprocess.run(
+        cmd, capture_output=True, timeout=timeout, cwd=ws, env=env, text=True,
+    )
+
+
+def parse_models(text: str) -> list[dict]:
+    found: list[dict] = []
+    data = extract_json(text)
+    rows = None
+    if isinstance(data, list):
+        rows = data
+    elif isinstance(data, dict):
+        rows = data.get("models") or data.get("data")
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, str) and "/" in row:
+                found.append({"id": row, "label": row.split("/")[-1]})
+            elif isinstance(row, dict):
+                mid = str(row.get("id") or row.get("model") or "")
+                if mid:
+                    found.append({"id": mid, "label": str(row.get("name") or mid.split("/")[-1])})
+    else:
+        for line in text.splitlines():
+            line = ANSI.sub("", line).strip()
+            if not line:
+                continue
+            mid = line.split()[0].strip("-*·")
+            if "/" in mid and len(mid) < 80:
+                found.append({"id": mid, "label": mid.split("/")[-1]})
+    seen = set()
+    out = []
+    for m in found:
+        if m["id"] in seen:
+            continue
+        seen.add(m["id"])
+        out.append(m)
+    return out
+
+
 def kill_current() -> None:
     with PROC_LOCK:
         proc = CURRENT.get("proc")
@@ -207,6 +338,19 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 self._json(400, {"error": str(e), "sessions": []})
             return
+        if u.path == "/api/models":
+            self._models()
+            return
+        if u.path == "/api/files":
+            qs = parse_qs(u.query)
+            try:
+                ws = workspace_ok((qs.get("workspace") or [default_workspace()])[0] or "")
+            except ValueError as e:
+                self._json(400, {"error": str(e), "files": []})
+                return
+            q = (qs.get("q") or [""])[0]
+            self._json(200, {"files": list_files(ws, q)})
+            return
         self._static(u.path)
 
     def _static(self, path: str) -> None:
@@ -246,7 +390,82 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/ask":
             self._ask(payload)
             return
+        if u.path == "/api/fx":
+            self._fx(payload)
+            return
+        if u.path == "/api/model":
+            self._set_model(payload)
+            return
         self._json(404, {"error": "not found"})
+
+    def _models(self) -> None:
+        if demo_mode():
+            self._json(200, {"models": DEMO_MODELS, "current": MODEL})
+            return
+        ws = default_workspace() or os.getcwd()
+        try:
+            ws = workspace_ok(ws)
+            r = run_fxs(ws, ["models", "--json"], timeout=60)
+            models = parse_models((r.stdout or "") + "\n" + (r.stderr or ""))
+            if not models:
+                r2 = run_fxs(ws, ["models"], timeout=60)
+                models = parse_models((r2.stdout or "") + "\n" + (r2.stderr or ""))
+        except Exception:
+            models = DEMO_MODELS
+        if not models:
+            models = DEMO_MODELS
+        self._json(200, {"models": models, "current": MODEL})
+
+    def _set_model(self, payload: dict) -> None:
+        global MODEL
+        mid = str(payload.get("model") or "").strip()
+        if not mid or "/" not in mid or len(mid) > 80:
+            self._json(400, {"error": "bad model"})
+            return
+        MODEL = mid
+        os.environ["FX_MODEL"] = mid
+        self._json(200, {"model": MODEL})
+
+    def _fx(self, payload: dict) -> None:
+        args = payload.get("args")
+        if not isinstance(args, list) or not args:
+            self._json(400, {"error": "args required"})
+            return
+        cmd0 = str(args[0])
+        if cmd0 not in SAFE_FX:
+            self._json(400, {"error": "command not allowed"})
+            return
+        extra = [str(a)[:200] for a in args[1:8]]
+        fx_args = [cmd0] + extra
+        if demo_mode():
+            demo = {
+                "status": f"demo · {MODEL}",
+                "usage": "—",
+                "credits": "—",
+                "balance": "—",
+                "doctor": "demo",
+                "help": "/new  /resume  /models  /permissions",
+                "models": "\n".join(m["id"] for m in DEMO_MODELS),
+                "sessions": "—",
+                "workspace": default_workspace() or "—",
+                "version": "fxs-ui",
+                "permissions": "yolo",
+            }
+            self._json(200, {"ok": True, "text": demo.get(cmd0, cmd0)})
+            return
+        try:
+            ws = workspace_ok(str(payload.get("workspace") or default_workspace() or ""))
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+            return
+        perm = clean_perm(payload.get("perm"))
+        try:
+            r = run_fxs(ws, fx_args, perm=perm, timeout=180)
+        except Exception as e:
+            self._json(500, {"error": str(e)})
+            return
+        text = ANSI.sub("", (r.stdout or "") + (("\n" + r.stderr) if r.stderr else ""))
+        self._json(200, {"ok": r.returncode == 0, "text": text.strip()[-4000:], "code": r.returncode})
 
     def _ask(self, payload: dict) -> None:
         prompt = str(payload.get("prompt") or "").strip()
@@ -275,48 +494,61 @@ class Handler(BaseHTTPRequestHandler):
         if demo_mode():
             self._demo(prompt, emit)
             return
+        perm = clean_perm(payload.get("perm") or ("yolo" if payload.get("yolo", True) else "auto"))
         self._run_fxs(
             prompt,
             ws,
             str(payload.get("resume") or ""),
-            bool(payload.get("yolo", True)),
+            perm,
+            payload.get("images") if isinstance(payload.get("images"), list) else [],
             emit,
         )
 
     def _demo(self, prompt: str, emit) -> None:
-        emit({"type": "tools", "tools": [{"name": "read"}, {"name": "search"}]})
+        emit({"type": "tools", "tools": [{"name": "read"}]})
         emit({"type": "activity", "text": "read"})
-        time.sleep(0.25)
+        time.sleep(0.18)
         text = (
-            f"**{prompt.strip()[:48]}**\n\n"
-            "Demo — this machine has no Docker, so nothing ran.\n\n"
-            "On yours:\n\n"
-            "```\ncd /path/to/project\nfxs ui\n```\n\n"
-            "Same sandbox as `fxs`. Esc stops. yolo is the default."
+            f"**{prompt.strip().splitlines()[0][:72]}**\n\n"
+            "`/` commands · `@` files · ⋯ for the rest"
         )
-        for word in text.split(" "):
-            emit({"type": "token", "text": word + " "})
-            time.sleep(0.016)
+        i = 0
+        while i < len(text):
+            emit({"type": "token", "text": text[i:i + 16]})
+            i += 16
+            time.sleep(0.012)
         emit({"type": "activity", "text": ""})
         emit({"type": "done"})
 
-    def _run_fxs(self, prompt: str, ws: str, resume: str, yolo: bool, emit) -> None:
-        fxs = which("fxs") or which("run-fx")
-        if not fxs:
+    def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
+        bin_ = fxs_bin()
+        if not bin_:
             emit({"type": "error", "text": "fxs is not on PATH"})
             emit({"type": "done"})
             return
-        cmd = [fxs, "run", "-w", ws]
-        if not yolo:
+        perm = clean_perm(perm)
+        cmd = [bin_, "run", "-w", ws]
+        if perm != "yolo":
             cmd.append("--no-yolo")
-        cmd += ["--", "ask"]
-        if yolo:
+        cmd += ["--perm", perm, "--", "ask", "--json"]
+        if perm == "yolo":
             cmd.append("--yolo")
         if resume:
             cmd += ["--resume", resume]
+        for img in images[:4]:
+            p = str(img)
+            if not p or ".." in p:
+                continue
+            ext = os.path.splitext(p)[1].lower()
+            if ext not in IMAGE_EXT:
+                continue
+            abs_img = p if os.path.isabs(p) else os.path.join(ws, p)
+            if os.path.isfile(abs_img):
+                cmd += ["--image", abs_img]
         cmd += ["--", prompt]
         env = os.environ.copy()
         env["FX_MODEL"] = MODEL
+        env["FX_PERMISSION_MODE"] = perm
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -335,37 +567,56 @@ class Handler(BaseHTTPRequestHandler):
 
         def pump_err() -> None:
             assert proc.stderr is not None
-            last = ""
             for raw in iter(proc.stderr.readline, b""):
                 line = ANSI.sub("", raw.decode("utf-8", errors="replace")).rstrip()
                 if not line or FXS_LINE.match(line):
                     continue
-                last = line[-120:]
-                emit({"type": "activity", "text": last})
+                emit({"type": "activity", "text": line[-120:]})
 
         t = threading.Thread(target=pump_err, daemon=True)
         t.start()
+        chunks: list[str] = []
         assert proc.stdout is not None
         while True:
-            chunk = proc.stdout.read(80)
+            chunk = proc.stdout.read(256)
             if not chunk:
                 break
             piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
-            if not piece:
-                continue
-            # docker wrapper should not be on stdout; still drop fxs: lines
-            kept = []
-            for line in piece.splitlines(True):
-                if FXS_LINE.match(line):
-                    continue
-                kept.append(line)
-            if kept:
-                emit({"type": "token", "text": "".join(kept)})
+            if piece:
+                chunks.append(piece)
         proc.wait()
         t.join(timeout=1)
         with PROC_LOCK:
             if CURRENT.get("proc") is proc:
                 CURRENT["proc"] = None
+        raw_out = "".join(chunks)
+        data = extract_json(raw_out)
+        if isinstance(data, dict):
+            tools = data.get("tool_calls") or []
+            if tools:
+                names = []
+                for tcall in tools:
+                    if isinstance(tcall, dict):
+                        names.append({"name": str(tcall.get("name") or "tool")})
+                    else:
+                        names.append({"name": str(tcall)})
+                emit({"type": "tools", "tools": names})
+            if data.get("session_id"):
+                emit({"type": "session", "id": data["session_id"]})
+            if data.get("model"):
+                emit({"type": "model", "id": data["model"]})
+            out = data.get("output") or data.get("error") or ""
+            if out:
+                emit({"type": "token", "text": str(out)})
+            if data.get("error") and not data.get("output"):
+                emit({"type": "error", "text": str(data["error"])})
+        elif raw_out.strip():
+            kept = []
+            for line in raw_out.splitlines(True):
+                if FXS_LINE.match(line):
+                    continue
+                kept.append(line)
+            emit({"type": "token", "text": "".join(kept)})
         if proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
                 emit({"type": "activity", "text": "stopped"})
@@ -386,6 +637,8 @@ def pick_host_port() -> tuple[str, int]:
             port = int(argv[i + 1]); i += 2; continue
         if a == "--demo":
             os.environ["FXS_UI_DEMO"] = "1"; i += 1; continue
+        if a == "--bind-all":
+            host = "0.0.0.0"; i += 1; continue
         i += 1
     return host, port
 
