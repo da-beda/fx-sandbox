@@ -172,11 +172,23 @@ class Steps(unittest.TestCase):
         self.assertEqual(s["path"], "README.md")
         self.assertEqual(s["status"], "running")
 
+    def test_progress_reading_done(self):
+        s = server.parse_step("Reading README.md")
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "README.md")
+        self.assertEqual(s["status"], "ok")
+
     def test_progress_listing(self):
         s = server.parse_step("Listing web")
         self.assertEqual(s["kind"], "list")
         self.assertEqual(s["path"], "web")
+        self.assertEqual(s["status"], "ok")
+
+    def test_progress_listing_running(self):
+        s = server.parse_step("● Listing web")
+        self.assertEqual(s["kind"], "list")
         self.assertEqual(s["status"], "running")
+        self.assertEqual(s["path"], "web")
 
     def test_progress_pathless_dropped_into_kind(self):
         s = server.parse_step("● Reading")

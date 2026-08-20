@@ -213,6 +213,7 @@ def parse_step(line: str) -> dict | None:
             "type": "step", "kind": kind, "label": label,
             "detail": rest, "path": path, "status": "running",
         }
+    had_lead = bool(LEAD_GLYPH.match(line))
     line = LEAD_GLYPH.sub("", line).strip()
     if not line:
         return None
@@ -222,12 +223,11 @@ def parse_step(line: str) -> dict | None:
             continue
         rest = (pm.group(2) or "").strip()
         path = step_path(rest)
-        gerund = pm.group(1).lower().endswith("ing")
         label = f"{verb} {shorten(Path(path).name if path and path != '.' else rest, 48)}".strip() if rest else verb
+        status = "running" if had_lead or not rest else "ok"
         return {
             "type": "step", "kind": kind, "label": label,
-            "detail": rest, "path": path,
-            "status": "running" if gerund else "ok",
+            "detail": rest, "path": path, "status": status,
         }
     return None
 
@@ -1175,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
         perm = clean_perm(perm)
-        base = ["ask", "--json"]
+        base = ["ask", "--json", "--no-color"]
         if perm == "yolo":
             base.append("--yolo")
         resume_flag: list[str] = []
@@ -1229,6 +1229,7 @@ class Handler(BaseHTTPRequestHandler):
 
             err_chunks: list[str] = []
             pending_steps = []
+            streamed_steps: list[dict] = []
 
             def pump_err() -> None:
                 assert proc.stderr is not None
@@ -1240,9 +1241,12 @@ class Handler(BaseHTTPRequestHandler):
                     step = parse_step(line)
                     if not step:
                         continue
+                    if step.get("status") == "running" and not (step.get("path") or step.get("detail")):
+                        continue
                     if resume_flag:
                         pending_steps.append(step)
                     else:
+                        streamed_steps.append(step)
                         emit(step)
 
             t = threading.Thread(target=pump_err, daemon=True)
@@ -1272,13 +1276,18 @@ class Handler(BaseHTTPRequestHandler):
 
         for step in pending_steps:
             emit(step)
+            streamed_steps.append(step)
         data = extract_json(raw_out) or extract_json(err_text)
         emitted = False
         if isinstance(data, dict):
             tools = data.get("tool_calls") or []
+            seen_kinds = {s.get("kind") for s in streamed_steps}
             if tools:
                 for tcall in tools:
-                    emit(tool_step(tcall))
+                    ts = tool_step(tcall)
+                    if not (ts.get("path") or ts.get("detail")) and ts.get("kind") in seen_kinds:
+                        continue
+                    emit(ts)
             if data.get("session_id"):
                 emit({"type": "session", "id": data["session_id"]})
             if data.get("model"):

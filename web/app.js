@@ -37,22 +37,22 @@
     more: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>',
   };
   const STEP_ICO = {
-    read: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h6.2L18.5 8.8v2.4"/><path d="M13.2 3.5v5.3h5.3"/><path d="M6.8 3.5H6.6A2.1 2.1 0 0 0 4.5 5.6v12.8A2.1 2.1 0 0 0 6.6 20.5H11"/><circle cx="16.2" cy="16.3" r="3.3"/><path d="m18.6 18.7 2.5 2.5"/></svg>',
-    write: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 16.4 16.2 5l2.8 2.8L7.6 19.2H4.8v-2.8z"/><path d="m14.4 6.8 2.8 2.8"/></svg>',
-    search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.4"/><path d="m16 16 4.3 4.3"/></svg>',
-    explore: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.4"/><path d="m16 16 4.3 4.3"/></svg>',
-    run: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><path d="M8 9.2 11.4 12 8 14.8"/><path d="M13.2 14.8H17"/></svg>',
-    web: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.4 2.6 3.6 5.4 3.6 8.2s-1.2 5.6-3.6 8.2C9.6 17.6 8.4 14.8 8.4 12S9.6 6.4 12 3.8z"/></svg>',
-    retry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.2-5.5"/><path d="M20 4.8v5.2h-5.2"/></svg>',
-    list: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7.2A1.8 1.8 0 0 1 6.3 5.4h3.2l1.7 2h8.3A1.8 1.8 0 0 1 21.3 9.2v8.6a1.8 1.8 0 0 1-1.8 1.8H6.3A1.8 1.8 0 0 1 4.5 17.8V7.2z"/></svg>',
-    delete: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15"/><path d="M9.2 4.5h5.6l.8 2.5H8.4l.8-2.5z"/><path d="M6.4 7l.8 12.2A1.6 1.6 0 0 0 8.8 20.5h6.4a1.6 1.6 0 0 0 1.6-1.3L17.6 7"/></svg>',
-    ok: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"/></svg>',
-    agent: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="10" r="2.4"/><path d="M7.4 17.2a5 5 0 0 1 9.2 0"/></svg>',
-    image: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.4"/><path d="m6 16.5 3.4-3.6 2.8 2.8 2.2-2 3.6 2.8"/></svg>',
-    skill: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8.2 4.5h3.4l1.2 2.2h6.5A1.6 1.6 0 0 1 20.9 8.3v9.6a1.6 1.6 0 0 1-1.6 1.6H4.7A1.6 1.6 0 0 1 3.1 17.9V6.1A1.6 1.6 0 0 1 4.7 4.5h3.5z"/><path d="M8 12.2h8M8 15.4h5"/></svg>',
-    status: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18.5h6"/><path d="M10 21h4"/><path d="M12 3.5a5.4 5.4 0 0 1 5.4 5.4c0 2.2-1.1 3.7-2.6 4.8v1.8H9.2v-1.8A5.4 5.4 0 0 1 12 3.5z"/></svg>',
-    tool: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m8 15.2 7.2-7.2 2.2 2.2-7.2 7.2H8v-2.2z"/><path d="m16.4 6.8 1.4-1.4a1.4 1.4 0 0 1 2 2L18.4 8.8"/></svg>',
-    chev: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+    read: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M7.2 2.5h6.2L18.5 7.6v3.2h-2V8.4h-4.6V4.5H7.2c-.7 0-1.3.6-1.3 1.3v12.4c0 .7.6 1.3 1.3 1.3H11v2H7.2A3.3 3.3 0 0 1 3.9 18.2V5.8A3.3 3.3 0 0 1 7.2 2.5zm8.7 10.2a3.8 3.8 0 1 1-2.5 6.6l-1.7 1.7 1.4 1.4 1.7-1.7a3.8 3.8 0 0 1 1.1-8zm0 2a1.8 1.8 0 1 0 .1 3.6 1.8 1.8 0 0 0-.1-3.6z"/></svg>',
+    write: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m4.8 16.4 10.2-10.2 2.8 2.8-10.2 10.2H4.8v-2.8zm12-12 1.4-1.4a1.5 1.5 0 0 1 2.1 2.1l-1.4 1.4-2.1-2.1z"/></svg>',
+    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 2.4a8.4 8.4 0 0 1 6.6 13.6l3.7 3.7-1.8 1.8-3.7-3.7A8.4 8.4 0 1 1 10.8 2.4zm0 2.4a6 6 0 1 0 .1 12 6 6 0 0 0-.1-12z"/></svg>',
+    explore: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 2.4a8.4 8.4 0 0 1 6.6 13.6l3.7 3.7-1.8 1.8-3.7-3.7A8.4 8.4 0 1 1 10.8 2.4zm0 2.4a6 6 0 1 0 .1 12 6 6 0 0 0-.1-12z"/></svg>',
+    run: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M6.6 3.4h10.8A3.2 3.2 0 0 1 20.6 6.6v10.8a3.2 3.2 0 0 1-3.2 3.2H6.6a3.2 3.2 0 0 1-3.2-3.2V6.6A3.2 3.2 0 0 1 6.6 3.4zM5.4 6.6c0-.7.5-1.2 1.2-1.2h10.8c.7 0 1.2.5 1.2 1.2v10.8c0 .7-.5 1.2-1.2 1.2H6.6c-.7 0-1.2-.5-1.2-1.2V6.6z"/><path d="M8 8.2 11.6 12 8 15.8l-1.5-1.3 2.4-2.5-2.4-2.5L8 8.2zm5 5.2h4.2v-2.1H13v2.1z"/></svg>',
+    web: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 2.2a9.8 9.8 0 1 1 0 19.6 9.8 9.8 0 0 1 0-19.6zm0 2.2c-1.8 2-2.8 4.3-3 6.6h6c-.2-2.3-1.2-4.6-3-6.6zM6.8 11c.2-2.6 1.4-5 3.2-6.9A7.6 7.6 0 0 0 4.4 11H6.8zm10.4 0h2.4A7.6 7.6 0 0 0 14 4.1c1.8 1.9 3 4.3 3.2 6.9zM4.4 13a7.6 7.6 0 0 0 5.6 6.9c-1.8-1.9-3-4.3-3.2-6.9H4.4zm4.6 0c.2 2.3 1.2 4.6 3 6.6 1.8-2 2.8-4.3 3-6.6H9zm6.6 0c-.2 2.6-1.4 5-3.2 6.9A7.6 7.6 0 0 0 19.6 13h-2.4z"/></svg>',
+    retry: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 1-8.4 5.8l1.9.7A7 7 0 1 0 12 5v3l4.2-4L12 0v3z"/></svg>',
+    list: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 4.2 10.8 6.4h6.8A2.2 2.2 0 0 1 19.8 8.6v9A2.2 2.2 0 0 1 17.6 19.8H6.4A2.2 2.2 0 0 1 4.2 17.6V6.4A2.2 2.2 0 0 1 6.4 4.2H9z"/></svg>',
+    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 3.4h5.6l.8 1.6h4.2v2H4.2v-2h4.2l.8-1.6zM6.2 8.2h11.6l-.9 11.3A2 2 0 0 1 14.9 21.4H9.1a2 2 0 0 1-2-1.9L6.2 8.2z"/></svg>',
+    ok: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.4-4-4 1.8-1.8 2.2 2.2 7.4-7.4 1.8 1.8-9.2 9.2z"/></svg>',
+    agent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.4a9.6 9.6 0 1 1 0 19.2 9.6 9.6 0 0 1 0-19.2zm0 6.6a2.8 2.8 0 1 0 .1 5.6 2.8 2.8 0 0 0-.1-5.6z"/></svg>',
+    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.8 3.4h10.4A3 3 0 0 1 20.2 6.4v11.2a3 3 0 0 1-3 3H6.8a3 3 0 0 1-3-3V6.4a3 3 0 0 1 3-3zM15.2 8a1.6 1.6 0 1 0 .1 3.2A1.6 1.6 0 0 0 15.2 8zM4.8 16.2 9 12.2l8.2 8.2c.3-.1.6-.3.9-.5L8.6 11.2 4.8 14.8v1.4z"/></svg>',
+    skill: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8 13.6 8.2h5.6l-4.5 3.3 1.7 5.5L12 13.9 7.6 17l1.7-5.5-4.5-3.3h5.6L12 2.8z"/></svg>',
+    status: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6A5.6 5.6 0 0 1 17.6 9.6c0 2-.9 3.5-2.4 4.6v1.8H8.8v-1.8A5.6 5.6 0 0 1 12 2.6zM9.4 17.6h5.2v1.4H9.4v-1.4zm.8 2.4h3.6V22h-3.6v-2z"/></svg>',
+    tool: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m7 14.4 7.6-7.6 2.2 2.2-7.6 7.6H7v-2.2zm8.4-9.8 1.5-1.5a1.5 1.5 0 0 1 2.1 2.1l-1.5 1.5-2.1-2.1zM5 17.4h5.4V21.2H5v-3.8z"/></svg>',
+    chev: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.2 8.8 12 14.6l5.8-5.8L19.2 10l-7.2 7.2L4.8 10l1.4-1.2z"/></svg>',
   };
   const LIVE_DOTS = '<span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
   const GROUPABLE = new Set(["read", "write", "search", "web", "list", "delete", "tool", "image", "skill"]);
@@ -1136,9 +1136,10 @@
     let detail = step.detail || "";
     let path = step.path || "";
     let status = step.status || "";
-    if ((kind === "ok" || kind === "status") && /recovered/i.test(label)) return null;
-    if (kind === "status" || kind === "tool" || !kind) {
-      const raw = stripGlyphs(label || detail);
+    if ((kind === "ok" || kind === "status" || kind === "retry") && /recovered/i.test(label + " " + detail)) return null;
+    const raw = stripGlyphs([label, detail].filter(Boolean).join(" "));
+    if (/recovered/i.test(raw) && /attempt|succeed/i.test(raw)) return null;
+    if (kind === "status" || kind === "tool" || kind === "ok" || !kind) {
       for (const [re, k] of PROGRESS_RE) {
         const m = raw.match(re);
         if (!m) continue;
@@ -1146,7 +1147,7 @@
         const rest = (m[2] || "").trim();
         if (!path) path = looksPath(rest);
         if (!detail) detail = rest;
-        if (!status) status = /ing$/i.test(m[1]) ? "running" : "ok";
+        if (!status || status === "ok") status = /ing$/i.test(m[1]) && !rest ? "running" : (status || "ok");
         break;
       }
     }

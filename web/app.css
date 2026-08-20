@@ -455,11 +455,11 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   content: "";
   position: absolute;
   left: 13.5px;
-  top: 22px;
-  bottom: -10px;
+  top: 23px;
+  bottom: -8px;
   width: 1px;
   background: color-mix(in srgb, var(--fg) 14%, transparent);
-  border-radius: 1px;
+  border-radius: 999px;
   pointer-events: none;
 }
 .ico-btn {
@@ -474,6 +474,8 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   background: var(--bg);
   pointer-events: auto;
   cursor: pointer;
+  display: grid;
+  place-items: center;
 }
 .ico-face {
   position: absolute;
@@ -482,7 +484,7 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   place-items: center;
   transition: opacity 60ms ease-out, transform 60ms ease-out;
 }
-.ico-face svg { display: block; }
+.ico-face svg { width: 14px; height: 14px; display: block; }
 .ico-face.chev {
   opacity: 0;
   transform: rotate(-90deg);
