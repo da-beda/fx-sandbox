@@ -805,17 +805,24 @@ button.step[data-path]:hover .ico { color: var(--fg); }
 .ed-dot[hidden] { display: none; }
 
 #tree-q {
-  width: 7.2rem;
-  flex: 0 0 auto;
+  display: none;
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: 32px;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 13px;
   color: var(--fg);
-  transition: width var(--quick) var(--ease);
+  appearance: none;
 }
 #tree-q::placeholder { color: var(--subtle); }
-#tree-q:focus { width: 9rem; background: color-mix(in srgb, var(--fg) 9%, transparent); }
+#tree-q::-webkit-search-decoration,
+#tree-q::-webkit-search-cancel-button { appearance: none; }
+.finding .pane-title { display: none; }
+.finding #tree-q { display: block; }
+.finding #tree-find { display: none; }
 
 .files-close { display: none; }
 
@@ -1129,8 +1136,6 @@ button.step[data-path]:hover .ico { color: var(--fg); }
     background: color-mix(in srgb, #000 40%, transparent);
     z-index: 39;
   }
-  #tree-q,
-  #tree-q:focus { width: 8.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
