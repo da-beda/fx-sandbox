@@ -425,15 +425,15 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
   margin-inline-start: -6px;
-  padding: 4px 2px 8px;
+  padding: 2px 2px 6px;
 }
 .step {
   position: relative;
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
-  grid-template-rows: auto auto;
+  grid-template-rows: 24px auto;
   align-items: start;
   width: 100%;
   color: var(--muted);
@@ -455,10 +455,10 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   content: "";
   position: absolute;
   left: 13.5px;
-  top: 23px;
-  bottom: -8px;
+  top: 22px;
+  bottom: -2px;
   width: 1px;
-  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
   border-radius: 999px;
   pointer-events: none;
 }
@@ -467,38 +467,50 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   z-index: 2;
   width: 24px;
   height: 24px;
-  margin-top: 0;
+  margin: 0;
   padding: 0;
   border: 0;
   color: var(--muted);
   background: var(--bg);
   pointer-events: auto;
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  flex-shrink: 0;
 }
 .ico-face {
   position: absolute;
   inset: 0;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
+  pointer-events: none;
   transition: opacity 60ms ease-out, transform 60ms ease-out;
 }
-.ico-face svg { width: 14px; height: 14px; display: block; }
-.ico-face.chev {
+.ico-face svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.ico-chev svg {
+  width: 16px;
+  height: 16px;
+}
+.ico-chev {
   opacity: 0;
   transform: rotate(-90deg);
   color: var(--muted);
 }
-.step.fold:hover .ico-face.kind,
-.step.fold.open .ico-face.kind { opacity: 0; }
-.step.fold:hover .ico-face.chev,
-.step.fold.open .ico-face.chev { opacity: 1; }
-.step.fold.open .ico-face.chev { transform: rotate(0deg); }
+.step.fold:hover .ico-kind,
+.step.fold.open .ico-kind { opacity: 0; }
+.step.fold:hover .ico-chev,
+.step.fold.open .ico-chev { opacity: 1; }
+.step.fold.open .ico-chev { transform: rotate(0deg); }
 .step .hit {
   grid-column: 2;
-  display: block;
+  display: flex;
+  align-items: center;
   min-width: 0;
+  min-height: 24px;
   margin: 0;
   padding: 0 8px 0 2px;
   border: 0;
@@ -509,12 +521,14 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   letter-spacing: inherit;
   text-align: left;
   width: 100%;
+  cursor: pointer;
 }
 .step .lab {
   display: flex;
   align-items: baseline;
   gap: 6px;
   min-width: 0;
+  width: 100%;
 }
 .step .verb {
   flex-shrink: 0;
@@ -550,40 +564,43 @@ button.tool:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg)
   display: none;
   grid-column: 2;
   flex-direction: column;
-  padding: 2px 8px 6px 2px;
+  padding: 0 8px 4px 2px;
 }
 .step.open > .kids { display: flex; }
 .kid {
-  min-height: 24px;
+  min-height: 22px;
   padding: 0;
   border: 0;
   background: none;
   color: var(--subtle);
   font: inherit;
   font-size: 13.5px;
-  line-height: 24px;
+  line-height: 22px;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-button.kid:hover { color: var(--fg); }
+button.kid:hover { color: var(--fg); cursor: pointer; }
 .step.live {
-  display: flex;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: 24px;
   align-items: center;
-  gap: 0;
   color: var(--muted);
-  padding-top: 4px;
-  padding-bottom: 8px;
+  padding: 2px 0 4px;
   animation: none;
 }
 .step.live .spine {
   width: 28px;
   height: 24px;
   align-self: center;
+  display: grid;
+  place-items: center;
 }
 .step.live .lab {
   padding-inline-start: 2px;
+  align-items: baseline;
 }
 .dots {
   width: 14px;
@@ -1411,7 +1428,8 @@ body.rail-on .rail {
   white-space: nowrap;
   max-width: 46%;
 }
-.chev, .kind {
+.tree-item > .chev,
+.tree-item > .kind {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
@@ -1419,8 +1437,9 @@ body.rail-on .rail {
   display: grid;
   place-items: center;
 }
-.chev svg, .kind svg { display: block; }
-.chev {
+.tree-item > .chev svg,
+.tree-item > .kind svg { display: block; }
+.tree-item > .chev {
   width: 12px;
   height: 12px;
   transition: transform var(--quick) var(--ease);

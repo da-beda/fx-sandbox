@@ -37,22 +37,22 @@
     more: '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/></svg>',
   };
   const STEP_ICO = {
-    read: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M7.2 2.5h6.2L18.5 7.6v3.2h-2V8.4h-4.6V4.5H7.2c-.7 0-1.3.6-1.3 1.3v12.4c0 .7.6 1.3 1.3 1.3H11v2H7.2A3.3 3.3 0 0 1 3.9 18.2V5.8A3.3 3.3 0 0 1 7.2 2.5zm8.7 10.2a3.8 3.8 0 1 1-2.5 6.6l-1.7 1.7 1.4 1.4 1.7-1.7a3.8 3.8 0 0 1 1.1-8zm0 2a1.8 1.8 0 1 0 .1 3.6 1.8 1.8 0 0 0-.1-3.6z"/></svg>',
-    write: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m4.8 16.4 10.2-10.2 2.8 2.8-10.2 10.2H4.8v-2.8zm12-12 1.4-1.4a1.5 1.5 0 0 1 2.1 2.1l-1.4 1.4-2.1-2.1z"/></svg>',
-    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 2.4a8.4 8.4 0 0 1 6.6 13.6l3.7 3.7-1.8 1.8-3.7-3.7A8.4 8.4 0 1 1 10.8 2.4zm0 2.4a6 6 0 1 0 .1 12 6 6 0 0 0-.1-12z"/></svg>',
-    explore: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 2.4a8.4 8.4 0 0 1 6.6 13.6l3.7 3.7-1.8 1.8-3.7-3.7A8.4 8.4 0 1 1 10.8 2.4zm0 2.4a6 6 0 1 0 .1 12 6 6 0 0 0-.1-12z"/></svg>',
-    run: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M6.6 3.4h10.8A3.2 3.2 0 0 1 20.6 6.6v10.8a3.2 3.2 0 0 1-3.2 3.2H6.6a3.2 3.2 0 0 1-3.2-3.2V6.6A3.2 3.2 0 0 1 6.6 3.4zM5.4 6.6c0-.7.5-1.2 1.2-1.2h10.8c.7 0 1.2.5 1.2 1.2v10.8c0 .7-.5 1.2-1.2 1.2H6.6c-.7 0-1.2-.5-1.2-1.2V6.6z"/><path d="M8 8.2 11.6 12 8 15.8l-1.5-1.3 2.4-2.5-2.4-2.5L8 8.2zm5 5.2h4.2v-2.1H13v2.1z"/></svg>',
-    web: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 2.2a9.8 9.8 0 1 1 0 19.6 9.8 9.8 0 0 1 0-19.6zm0 2.2c-1.8 2-2.8 4.3-3 6.6h6c-.2-2.3-1.2-4.6-3-6.6zM6.8 11c.2-2.6 1.4-5 3.2-6.9A7.6 7.6 0 0 0 4.4 11H6.8zm10.4 0h2.4A7.6 7.6 0 0 0 14 4.1c1.8 1.9 3 4.3 3.2 6.9zM4.4 13a7.6 7.6 0 0 0 5.6 6.9c-1.8-1.9-3-4.3-3.2-6.9H4.4zm4.6 0c.2 2.3 1.2 4.6 3 6.6 1.8-2 2.8-4.3 3-6.6H9zm6.6 0c-.2 2.6-1.4 5-3.2 6.9A7.6 7.6 0 0 0 19.6 13h-2.4z"/></svg>',
-    retry: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 1-8.4 5.8l1.9.7A7 7 0 1 0 12 5v3l4.2-4L12 0v3z"/></svg>',
-    list: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 4.2 10.8 6.4h6.8A2.2 2.2 0 0 1 19.8 8.6v9A2.2 2.2 0 0 1 17.6 19.8H6.4A2.2 2.2 0 0 1 4.2 17.6V6.4A2.2 2.2 0 0 1 6.4 4.2H9z"/></svg>',
-    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 3.4h5.6l.8 1.6h4.2v2H4.2v-2h4.2l.8-1.6zM6.2 8.2h11.6l-.9 11.3A2 2 0 0 1 14.9 21.4H9.1a2 2 0 0 1-2-1.9L6.2 8.2z"/></svg>',
-    ok: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.4-4-4 1.8-1.8 2.2 2.2 7.4-7.4 1.8 1.8-9.2 9.2z"/></svg>',
-    agent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.4a9.6 9.6 0 1 1 0 19.2 9.6 9.6 0 0 1 0-19.2zm0 6.6a2.8 2.8 0 1 0 .1 5.6 2.8 2.8 0 0 0-.1-5.6z"/></svg>',
-    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.8 3.4h10.4A3 3 0 0 1 20.2 6.4v11.2a3 3 0 0 1-3 3H6.8a3 3 0 0 1-3-3V6.4a3 3 0 0 1 3-3zM15.2 8a1.6 1.6 0 1 0 .1 3.2A1.6 1.6 0 0 0 15.2 8zM4.8 16.2 9 12.2l8.2 8.2c.3-.1.6-.3.9-.5L8.6 11.2 4.8 14.8v1.4z"/></svg>',
-    skill: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8 13.6 8.2h5.6l-4.5 3.3 1.7 5.5L12 13.9 7.6 17l1.7-5.5-4.5-3.3h5.6L12 2.8z"/></svg>',
-    status: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6A5.6 5.6 0 0 1 17.6 9.6c0 2-.9 3.5-2.4 4.6v1.8H8.8v-1.8A5.6 5.6 0 0 1 12 2.6zM9.4 17.6h5.2v1.4H9.4v-1.4zm.8 2.4h3.6V22h-3.6v-2z"/></svg>',
-    tool: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m7 14.4 7.6-7.6 2.2 2.2-7.6 7.6H7v-2.2zm8.4-9.8 1.5-1.5a1.5 1.5 0 0 1 2.1 2.1l-1.5 1.5-2.1-2.1zM5 17.4h5.4V21.2H5v-3.8z"/></svg>',
-    chev: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.2 8.8 12 14.6l5.8-5.8L19.2 10l-7.2 7.2L4.8 10l1.4-1.2z"/></svg>',
+    read: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M7 3h6.2L18 7.8V11h-1.8V8.6H12V4.8H7A1.2 1.2 0 0 0 5.8 6v12A1.2 1.2 0 0 0 7 19.2h4.2V21H7A3 3 0 0 1 4 18V6a3 3 0 0 1 3-3zm9.75 9.2a4.05 4.05 0 1 1-2.86 6.92l-2 2 1.27 1.27 2-2A4.05 4.05 0 0 1 16.75 12.2zm0 1.8a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5z"/></svg>',
+    write: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4.8 16.7 15.4 6.1l2.5 2.5-10.6 10.6H4.8v-2.5zm12.2-12.3 1.3-1.3a1.4 1.4 0 0 1 2 2l-1.3 1.3-2-2z"/></svg>',
+    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 3a7.8 7.8 0 0 1 6.17 12.57l3.73 3.73-1.41 1.41-3.73-3.73A7.8 7.8 0 1 1 10.8 3zm0 1.8a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>',
+    explore: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M10.8 3a7.8 7.8 0 0 1 6.17 12.57l3.73 3.73-1.41 1.41-3.73-3.73A7.8 7.8 0 1 1 10.8 3zm0 1.8a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>',
+    run: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M6.2 3.5h11.6A2.7 2.7 0 0 1 20.5 6.2v11.6a2.7 2.7 0 0 1-2.7 2.7H6.2a2.7 2.7 0 0 1-2.7-2.7V6.2A2.7 2.7 0 0 1 6.2 3.5zM5.3 6.2c0-.5.4-.9.9-.9h11.6c.5 0 .9.4.9.9v11.6c0 .5-.4.9-.9.9H6.2a.9.9 0 0 1-.9-.9V6.2z"/><path d="M8.2 8.4 11.8 12 8.2 15.6l-1.3-1.3 2.1-2.3-2.1-2.3L8.2 8.4zm5.2 5.2h4.2v-1.8h-4.2v1.8z"/></svg>',
+    web: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm0 1.8c-1.66 1.86-2.66 4.1-2.86 6.5h5.72C14.66 8.9 13.66 6.66 12 4.8zM6.3 11.3c.22-2.5 1.32-4.8 3.02-6.6A7.18 7.18 0 0 0 4.82 11.3H6.3zm11.4 0h1.48A7.18 7.18 0 0 0 14.68 4.7c1.7 1.8 2.8 4.1 3.02 6.6zM4.82 12.7A7.18 7.18 0 0 0 9.32 19.3c-1.7-1.8-2.8-4.1-3.02-6.6H4.82zm3.5 0c.2 2.4 1.2 4.64 2.86 6.5 1.66-1.86 2.66-4.1 2.86-6.5H8.32zm6.86 0c-.22 2.5-1.32 4.8-3.02 6.6a7.18 7.18 0 0 0 4.5-6.6h-1.48z"/></svg>',
+    retry: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2a8.8 8.8 0 1 1-8.1 5.6l1.7.7A7 7 0 1 0 12 5.2V8l4-4-4-4v3.2z"/></svg>',
+    list: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 4 11 6.2h6.4A2.4 2.4 0 0 1 19.8 8.6v8.8a2.4 2.4 0 0 1-2.4 2.4H6.6A2.4 2.4 0 0 1 4.2 17.4V6.4A2.4 2.4 0 0 1 6.6 4h2.6z"/></svg>',
+    delete: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.2 3.4h5.6l.8 1.6h4.2v1.8H4.2V5h4.2l.8-1.6zM6.4 8.4h11.2l-.8 11.2a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6.4 8.4z"/></svg>',
+    ok: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.2-4-4 1.6-1.6 2.4 2.4 7.2-7.2 1.6 1.6-8.8 8.8z"/></svg>',
+    agent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm0 6.2a2.8 2.8 0 1 0 .1 5.6 2.8 2.8 0 0 0-.1-5.6z"/></svg>',
+    image: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 3.6h10.8A2.6 2.6 0 0 1 20 6.2v11.6a2.6 2.6 0 0 1-2.6 2.6H6.6A2.6 2.6 0 0 1 4 17.8V6.2A2.6 2.6 0 0 1 6.6 3.6zm8.6 3.8a1.5 1.5 0 1 0 .1 3 1.5 1.5 0 0 0-.1-3zM5.8 16.4 9.4 12.8l8 8c.3-.2.6-.4.8-.7l-9-9-3.4 3.4v2.9z"/></svg>',
+    skill: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7.4 3.2a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2zm9.6 1.4 2.2 3.8h-4.4l2.2-3.8zM6.6 13.2h2.4A2.4 2.4 0 0 1 11.4 15.6v2.4A2.4 2.4 0 0 1 9 20.4H6.6A2.4 2.4 0 0 1 4.2 18v-2.4A2.4 2.4 0 0 1 6.6 13.2zm10.4.2a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8z"/></svg>',
+    status: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2A5.2 5.2 0 0 1 17.2 9.8c0 1.8-.9 3.2-2.3 4.2v1.6H9.1v-1.6A5.2 5.2 0 0 1 12 3.2zM9.4 17.2h5.2v1.2H9.4v-1.2zm.8 2.2h3.6V21h-3.6v-1.6z"/></svg>',
+    tool: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m7.2 14.2 7.4-7.4 2.2 2.2-7.4 7.4H7.2v-2.2zm8.2-9.6 1.5-1.5a1.5 1.5 0 0 1 2.1 2.1l-1.5 1.5-2.1-2.1zM5 17.2h5.2V21H5v-3.8z"/></svg>',
+    chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6.4 9.2 12 14.8l5.6-5.6 1.4 1.4-7 7-7-7 1.4-1.4z"/></svg>',
   };
   const LIVE_DOTS = '<span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
   const GROUPABLE = new Set(["read", "write", "search", "web", "list", "delete", "tool", "image", "skill"]);
@@ -1117,7 +1117,7 @@
   ];
 
   function stripGlyphs(s) {
-    return String(s || "").replace(/^[\s\-|*·•●○◉◎◐◑◒◓✓✔▸►▶▷⬤⏺⚫⚪∙⋅⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+/u, "").trim();
+    return String(s || "").replace(/^[^\p{L}\p{N}.\/~]+/u, "").trim();
   }
 
   function looksPath(s) {
@@ -1226,8 +1226,8 @@
     el.innerHTML =
       '<div class="spine">' +
         '<button type="button" class="ico-btn" aria-expanded="' + exp + '" aria-label="' + esc(lab.aria) + '">' +
-          '<span class="ico-face kind" aria-hidden="true">' + ico + "</span>" +
-          '<span class="ico-face chev" aria-hidden="true">' + STEP_ICO.chev + "</span>" +
+          '<span class="ico-face ico-kind" aria-hidden="true">' + ico + "</span>" +
+          '<span class="ico-face ico-chev" aria-hidden="true">' + STEP_ICO.chev + "</span>" +
         "</button>" +
       "</div>" +
       '<button type="button" class="hit" aria-expanded="' + exp + '">' +
@@ -1321,13 +1321,18 @@
         clearInterval(iv);
         const spent = fmtElapsed(Date.now() - t0);
         solids().forEach((el) => {
+          if (el.dataset.kind === "retry") {
+            if (ok !== false) el.remove();
+            return;
+          }
           if (!el.classList.contains("running")) return;
           const items = stepItems(el).map((it) => Object.assign({}, it, { status: "ok" }));
-          paintStep(el, { kind: el.dataset.kind, status: "ok" }, items);
+          const verb = (el.querySelector(".verb") || {}).textContent || "";
+          paintStep(el, { kind: el.dataset.kind, status: "ok", label: verb }, items);
         });
         if (ok === false) {
           live.className = "step live warn";
-          live.innerHTML = '<div class="spine"><span class="ico-face kind" aria-hidden="true">' +
+          live.innerHTML = '<div class="spine"><span class="ico-face ico-kind" aria-hidden="true">' +
             STEP_ICO.retry + "</span></div>" +
             '<span class="lab"><span class="verb">Stopped</span><span class="num"> · ' + spent + "</span></span>";
         } else {

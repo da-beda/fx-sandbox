@@ -148,9 +148,7 @@ def shorten(s: str, n: int = 72) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-LEAD_GLYPH = re.compile(
-    r"^[\s\-|*·•●○◉◎◐◑◒◓✓✔▸►▶▷⬤⏺⚫⚪∙⋅\u2800-\u28FF\u25A0-\u25CF]+"
-)
+LEAD_GLYPH = re.compile(r"^[^\w./~]+", re.UNICODE)
 PROGRESS = (
     (re.compile(r"^(reading|read)\b\s*(.*)$", re.I), "read", "Read"),
     (re.compile(r"^(listing|listed|list)\b\s*(.*)$", re.I), "list", "Listed"),
@@ -235,14 +233,28 @@ def tool_step(tcall) -> dict:
     if not isinstance(tcall, dict):
         name = str(tcall).strip()
         tcall = {"name": name}
-    name = str(tcall.get("name") or "tool").strip()
+    name = str(tcall.get("name") or tcall.get("tool_name") or "tool").strip()
     parts = name.split(None, 1)
     key = parts[0].lower().replace("-", "_")
     rest = parts[1] if len(parts) > 1 else ""
     kind, verb = TOOL_KIND.get(key, ("tool", key.replace("_", " ")))
-    path = str(tcall.get("path") or tcall.get("file") or tcall.get("target") or "")
-    cmd = str(tcall.get("command") or tcall.get("cmd") or "")
-    query = str(tcall.get("query") or tcall.get("pattern") or "")
+    args = tcall.get("arguments") or tcall.get("input") or {}
+    raw_args = tcall.get("arguments_json") or tcall.get("argumentsJson")
+    if isinstance(raw_args, str) and raw_args.strip():
+        try:
+            parsed = json.loads(raw_args)
+            if isinstance(parsed, dict):
+                args = parsed
+        except json.JSONDecodeError:
+            pass
+    if not isinstance(args, dict):
+        args = {}
+    path = str(
+        tcall.get("path") or tcall.get("file") or tcall.get("target")
+        or args.get("path") or args.get("file") or args.get("target") or args.get("dir") or ""
+    )
+    cmd = str(tcall.get("command") or tcall.get("cmd") or args.get("command") or args.get("cmd") or "")
+    query = str(tcall.get("query") or tcall.get("pattern") or args.get("query") or args.get("pattern") or "")
     extra = path or cmd or query or rest
     if extra and not path and ("/" in extra or "." in extra) and " " not in extra:
         path = extra

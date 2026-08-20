@@ -149,6 +149,16 @@ class Steps(unittest.TestCase):
         self.assertEqual(s["path"], "README.md")
         self.assertEqual(s["status"], "ok")
 
+    def test_arguments_json_path(self):
+        s = server.tool_step({
+            "name": "read_file",
+            "arguments_json": '{"path":"web/app.js"}',
+            "status": "success",
+        })
+        self.assertEqual(s["kind"], "read")
+        self.assertEqual(s["path"], "web/app.js")
+        self.assertEqual(s["status"], "ok")
+
     def test_run_command_kind(self):
         s = server.tool_step({"name": "run_command", "command": "fx status --json"})
         self.assertEqual(s["kind"], "run")
