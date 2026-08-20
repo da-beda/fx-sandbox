@@ -653,8 +653,6 @@
   }
 
   function addMsg(kind, text) {
-    const blank = $("blank");
-    if (blank) blank.hidden = true;
     const el = document.createElement("div");
     el.className = "msg " + kind;
     if (kind === "user" || kind === "sys") el.textContent = text;
@@ -854,15 +852,13 @@
     state.resume = "";
     localStorage.removeItem("fxs.resume");
     thread.innerHTML = "";
-    const blank = $("blank");
-    if (blank) blank.hidden = false;
-    playMark();
+    closeChrome();
     promptEl.focus();
   }
 
   function playMark() {
-    const mark = document.querySelector("#blank .mark");
-    if (!mark || $("blank")?.hidden) return;
+    const mark = document.querySelector(".brand .mark");
+    if (!mark) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     mark.querySelectorAll(".shimmer-band").forEach((el) => {
       el.classList.remove("is-playing");
@@ -870,6 +866,60 @@
       el.classList.add("is-playing");
     });
   }
+
+  let chromeAnims = [];
+  function morphChrome(open) {
+    const body = document.body;
+    const wantWelcome = !open;
+    if (body.classList.contains("welcome") === wantWelcome) {
+      if (wantWelcome) playMark();
+      return;
+    }
+    const brand = $("brand");
+    const dock = document.querySelector(".dock");
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    chromeAnims.forEach((a) => { try { a.cancel(); } catch { /* ignore */ } });
+    chromeAnims = [];
+    if (reduced || !brand || !dock) {
+      body.classList.toggle("welcome", wantWelcome);
+      playMark();
+      return;
+    }
+    const firstB = brand.getBoundingClientRect();
+    const firstD = dock.getBoundingClientRect();
+    body.classList.toggle("welcome", wantWelcome);
+    const lastB = brand.getBoundingClientRect();
+    const lastD = dock.getBoundingClientRect();
+    const bx = firstB.left - lastB.left;
+    const by = firstB.top - lastB.top;
+    const sx = lastB.width ? firstB.width / lastB.width : 1;
+    const sy = lastB.height ? firstB.height / lastB.height : 1;
+    const dx = firstD.left - lastD.left;
+    const dy = firstD.top - lastD.top;
+    const ease = "cubic-bezier(0.32, 0.72, 0, 1)";
+    const bAnim = brand.animate(
+      [
+        { transform: `translate(${bx}px, ${by}px) scale(${sx}, ${sy})` },
+        { transform: "none" },
+      ],
+      { duration: 460, easing: ease, fill: "both" }
+    );
+    const dAnim = dock.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)` },
+        { transform: "none" },
+      ],
+      { duration: 520, easing: ease, delay: 20, fill: "both" }
+    );
+    chromeAnims = [bAnim, dAnim];
+    const done = () => {
+      chromeAnims = [];
+      playMark();
+    };
+    Promise.all([bAnim.finished, dAnim.finished]).then(done).catch(done);
+  }
+  function openChrome() { morphChrome(true); }
+  function closeChrome() { morphChrome(false); }
 
   async function loadModels() {
     const list = $("model-list");
@@ -977,6 +1027,7 @@
       openSettings();
       return;
     }
+    openChrome();
     setBusy(true);
     addMsg("user", text);
     promptEl.value = "";
@@ -1315,9 +1366,10 @@
     veil.hidden = !(state.filesOn && mobile() && !state.editing);
   });
   promptEl.focus();
-  const blank = $("blank");
-  if (blank) {
-    blank.addEventListener("pointerenter", playMark);
-    requestAnimationFrame(() => setTimeout(playMark, 280));
+  const brand = $("brand");
+  if (brand) {
+    brand.addEventListener("pointerenter", playMark);
+    brand.addEventListener("click", playMark);
   }
+  requestAnimationFrame(() => setTimeout(playMark, 280));
 })();
