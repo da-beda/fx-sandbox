@@ -798,11 +798,71 @@ def unified_finish(reason: str) -> str:
     }.get(reason, "other")
 
 
+# Models often emit generic names (web_search, bash). fx 0.0.4's catalog
+# lists Vercel provider tools like perplexity_search that this translator
+# cannot execute — unknown/provider names become MalformedProviderResultIdentity.
+TOOL_NAME_ALIASES = {
+    "web_search": "web_fetch",
+    "search_web": "web_fetch",
+    "perplexity_search": "web_fetch",
+    "bash": "terminal",
+    "shell": "terminal",
+    "run_command": "terminal",
+    "command": "terminal",
+    "exec": "terminal",
+    "read": "read_file",
+    "write": "write_file",
+    "edit": "edit_file",
+    "grep": "grep_files",
+    "glob": "glob_files",
+    "ls": "list_files",
+    "list": "list_files",
+    "fetch": "web_fetch",
+}
+PROVIDER_SEARCH_TOOLS = {"web_search", "search_web", "perplexity_search", "search"}
+
+
+def canonical_tool_name(name: str, allowed: Optional[list[str]] = None) -> str:
+    raw = (name or "").strip()
+    if not raw:
+        return raw
+    allow = {a for a in (allowed or []) if a}
+    if raw in PROVIDER_SEARCH_TOOLS and (not allow or "web_fetch" in allow):
+        return "web_fetch"
+    if raw in allow:
+        return raw
+    alias = TOOL_NAME_ALIASES.get(raw) or TOOL_NAME_ALIASES.get(raw.lower())
+    if alias and (not allow or alias in allow):
+        return alias
+    return raw
+
+
+def coerce_tool_input(name: str, parsed: Any, allowed: Optional[list[str]] = None) -> tuple[str, Any]:
+    """Map search-style args onto web_fetch.url when we rewrote the tool."""
+    name = canonical_tool_name(name, allowed)
+    if not isinstance(parsed, dict):
+        return name, parsed
+    if name != "web_fetch":
+        return name, parsed
+    if parsed.get("url"):
+        return name, parsed
+    q = str(parsed.get("query") or parsed.get("q") or parsed.get("search") or "").strip()
+    if not q:
+        return name, parsed
+    if q.startswith("http://") or q.startswith("https://"):
+        return name, {"url": q}
+    if " " not in q and "." in q and "/" not in q.split(".", 1)[0]:
+        return name, {"url": "https://" + q}
+    from urllib.parse import quote_plus
+    return name, {"url": "https://html.duckduckgo.com/html/?q=" + quote_plus(q)}
+
+
 class Stream:
-    def __init__(self) -> None:
+    def __init__(self, allowed_tools: Optional[list[str]] = None) -> None:
         self.tools: dict[int, dict[str, Any]] = {}
         self.order: list[int] = []
         self.finished = False
+        self.allowed_tools = list(allowed_tools or [])
 
     def consume(self, data: bytes | str) -> list[bytes]:
         if isinstance(data, str):
@@ -826,18 +886,27 @@ class Stream:
         content = delta.get("content") or ""
         if content:
             events.append(_j({"type": "text-delta", "delta": content}))
-        reasoning = delta.get("reasoning") or delta.get("reasoning_content") or ""
-        if reasoning:
-            events.append(_j({"type": "reasoning-delta", "delta": reasoning}))
-        for call in delta.get("tool_calls") or []:
+        # OpenRouter stealth models stream `reasoning` before tool_calls. fx
+        # treats an open reasoning part as MalformedProviderResultIdentity
+        # when a tool-input-start follows, so we do not forward it.
+        calls = delta.get("tool_calls") or (choice.get("message") or {}).get("tool_calls") or []
+        for call in calls:
             idx = int(call.get("index") or 0)
             acc = self._tool(idx)
             if call.get("id"):
                 acc["id"] = call["id"]
+            elif not acc["id"]:
+                acc["id"] = f"call_{idx}"
             fn = call.get("function") or {}
             if fn.get("name"):
-                acc["name"] = fn["name"]
-            if not acc["started"] and acc["id"] and acc["name"]:
+                raw_name = fn["name"]
+                acc["raw_name"] = raw_name
+                acc["name"] = canonical_tool_name(raw_name, self.allowed_tools)
+            rewrite = (acc.get("raw_name") or acc.get("name") or "") in PROVIDER_SEARCH_TOOLS or (
+                acc.get("name") == "web_fetch" and (acc.get("raw_name") or "") != "web_fetch"
+            )
+            acc["rewrite"] = bool(acc.get("rewrite") or rewrite)
+            if not acc["started"] and acc["id"] and acc["name"] and not acc.get("rewrite"):
                 acc["started"] = True
                 events.append(_j({
                     "type": "tool-input-start",
@@ -847,7 +916,7 @@ class Stream:
             args = fn.get("arguments") or ""
             if args:
                 acc["args"] += args
-                if acc["started"]:
+                if acc["started"] and not acc.get("rewrite"):
                     events.append(_j({
                         "type": "tool-input-delta",
                         "id": acc["id"],
@@ -880,21 +949,38 @@ class Stream:
             acc = self.tools.get(idx)
             if not acc or not acc.get("id"):
                 continue
-            if acc.get("started"):
-                events.append(_j({"type": "tool-input-end", "id": acc["id"]}))
             args = acc.get("args") or "{}"
             try:
                 parsed = json.loads(args)
                 if not isinstance(parsed, dict):
                     raise ValueError("not object")
-                events.append(_j({
-                    "type": "tool-call",
-                    "toolCallId": acc["id"],
-                    "toolName": acc.get("name") or "",
-                    "input": parsed,
-                }))
             except (json.JSONDecodeError, ValueError):
+                if acc.get("started"):
+                    events.append(_j({"type": "tool-input-end", "id": acc["id"]}))
                 events.append(_j({"type": "error", "error": "tool arguments are not valid JSON"}))
+                continue
+            name, parsed = coerce_tool_input(acc.get("name") or acc.get("raw_name") or "", parsed, self.allowed_tools)
+            acc["name"] = name
+            final_args = json.dumps(parsed, separators=(",", ":"))
+            if not acc.get("started"):
+                events.append(_j({
+                    "type": "tool-input-start",
+                    "id": acc["id"],
+                    "toolName": name,
+                }))
+                events.append(_j({
+                    "type": "tool-input-delta",
+                    "id": acc["id"],
+                    "delta": final_args,
+                }))
+                acc["started"] = True
+            events.append(_j({"type": "tool-input-end", "id": acc["id"]}))
+            events.append(_j({
+                "type": "tool-call",
+                "toolCallId": acc["id"],
+                "toolName": name,
+                "input": parsed,
+            }))
         finish: dict[str, Any] = {
             "type": "finish",
             "finishReason": {"unified": unified_finish(reason)},
@@ -921,8 +1007,8 @@ class Stream:
 class ResponseStream(Stream):
     """OpenAI Responses SSE (`response.output_text.delta`, …) → Gateway events."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, allowed_tools: Optional[list[str]] = None) -> None:
+        super().__init__(allowed_tools)
         self.ids: dict[str, str] = {}  # item_id → call_id
 
     def consume(self, data: bytes | str) -> list[bytes]:
@@ -1025,7 +1111,7 @@ class ResponseStream(Stream):
         if call_id:
             acc["id"] = call_id
         if item.get("name"):
-            acc["name"] = item["name"]
+            acc["name"] = canonical_tool_name(item["name"], self.allowed_tools)
         if item.get("arguments"):
             acc["args"] += item["arguments"]
         events: list[bytes] = []
@@ -1342,6 +1428,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
             inbound = json.loads(raw.decode() if raw else b"{}")
         except json.JSONDecodeError:
             inbound = {}
+        allowed = [
+            str(t.get("name") or "")
+            for t in (inbound.get("tools") or [])
+            if isinstance(t, dict) and t.get("name")
+        ]
         if resp_req:
             reasoning = _responses_reasoning(inbound if isinstance(inbound, dict) else {})
             if reasoning:
@@ -1365,7 +1456,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                         self.end_headers()
                     except (BrokenPipeError, ConnectionResetError):
                         return
-                    conv: Stream = Stream()
+                    conv: Stream = Stream(allowed)
                     self._write_events(conv.fail(msg))
                     self.close_connection = True
                     return
@@ -1389,7 +1480,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.end_headers()
             except (BrokenPipeError, ConnectionResetError):
                 return
-            conv: Stream = ResponseStream() if used_responses else Stream()
+            conv: Stream = ResponseStream(allowed) if used_responses else Stream(allowed)
             try:
                 for data in read_sse_data(resp):
                     if data.strip() == "[DONE]":

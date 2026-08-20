@@ -188,8 +188,41 @@ class SSE(unittest.TestCase):
     def test_reasoning_delta(self):
         s = gateway.Stream()
         got = s.consume(b'{"choices":[{"delta":{"reasoning_content":"hmm"}}]}')
-        self.assertEqual(json.loads(got[0])["type"], "reasoning-delta")
-        self.assertEqual(json.loads(got[0])["delta"], "hmm")
+        self.assertEqual(got, [])
+
+    def test_web_search_alias(self):
+        s = gateway.Stream(allowed_tools=["perplexity_search", "web_fetch"])
+        got = s.consume(json.dumps({
+            "choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "c1",
+                "function": {"name": "web_search", "arguments": '{"query":"https://example.com"}'},
+            }]}}],
+        }))
+        got += s.consume(b'{"choices":[{"finish_reason":"tool_calls"}]}')
+        types = [json.loads(e)["type"] for e in got]
+        self.assertEqual(types, [
+            "tool-input-start", "tool-input-delta", "tool-input-end", "tool-call", "finish",
+        ])
+        start = json.loads(got[0])
+        self.assertEqual(start["toolName"], "web_fetch")
+        call = json.loads(got[3])
+        self.assertEqual(call["toolName"], "web_fetch")
+        self.assertEqual(call["input"], {"url": "https://example.com"})
+
+    def test_canonical_tool_name(self):
+        self.assertEqual(
+            gateway.canonical_tool_name("web_search", ["perplexity_search", "web_fetch"]),
+            "web_fetch",
+        )
+        self.assertEqual(
+            gateway.canonical_tool_name("web_fetch", ["perplexity_search", "web_fetch"]),
+            "web_fetch",
+        )
+        self.assertEqual(
+            gateway.canonical_tool_name("perplexity_search", ["perplexity_search", "web_fetch"]),
+            "web_fetch",
+        )
+        self.assertEqual(gateway.canonical_tool_name("bash", ["terminal"]), "terminal")
 
     def test_fail_emits_error_finish(self):
         s = gateway.Stream()

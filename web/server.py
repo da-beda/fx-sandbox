@@ -63,9 +63,11 @@ TOOL_KIND = {
     "shell": ("run", "Ran"),
     "exec": ("run", "Ran"),
     "command": ("run", "Ran"),
+    "terminal": ("run", "Ran"),
     "web_search": ("web", "Searched"),
     "web_fetch": ("web", "Fetched"),
     "fetch": ("web", "Fetched"),
+    "perplexity_search": ("web", "Searched"),
     "subagent": ("agent", "Agent"),
     "vision": ("image", "Looked"),
     "ask_user_question": ("status", "Asked"),
@@ -155,6 +157,7 @@ PROGRESS = (
     (re.compile(r"^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$", re.I), "write", "Edited"),
     (re.compile(r"^(running|ran|executing|execute)\b(?:\s+command)?\s*(.*)$", re.I), "run", "Ran"),
     (re.compile(r"^(searching|searched|search|grepping|grep)\b\s*(.*)$", re.I), "search", "Searched"),
+    (re.compile(r"^(fetching|fetched|fetch|converting|converted)\b\s*(.*)$", re.I), "web", "Fetched"),
     (re.compile(r"^(loading|loaded)\s+(?:skill\s+)?(.*)$", re.I), "skill", "Loaded"),
     (re.compile(r"^(viewing|viewed)\b\s*(.*)$", re.I), "image", "Viewed"),
 )
@@ -256,11 +259,17 @@ def tool_step(tcall) -> dict:
     cmd = str(tcall.get("command") or tcall.get("cmd") or args.get("command") or args.get("cmd") or "")
     query = str(tcall.get("query") or tcall.get("pattern") or args.get("query") or args.get("pattern") or "")
     extra = path or cmd or query or rest
+    for nest in ("web_fetch", "perplexity_search", "web_search"):
+        blob = tcall.get(nest)
+        if isinstance(blob, dict):
+            extra = extra or str(blob.get("url") or blob.get("query") or "")
+            if not path and blob.get("url"):
+                path = str(blob["url"])
     if extra and not path and ("/" in extra or "." in extra) and " " not in extra:
         path = extra
     label = verb
     if extra:
-        shown = Path(extra).name if path else extra
+        shown = extra if extra.startswith("http") else (Path(extra).name if path else extra)
         label = f"{verb} {shorten(shown, 42)}".strip()
     st = str(tcall.get("status") or "ok").lower()
     if st in ("success", "ok", "completed", "done"):
@@ -767,6 +776,8 @@ def recover_error(stdout: str, stderr: str) -> str:
         if code:
             return str(code)
     lowered = blob.lower()
+    if "malformedproviderresultidentity" in lowered.replace("_", "").replace(" ", ""):
+        return "The model called a tool fx does not expose. Try again."
     if "provider_unavailable" in lowered or "http 503" in lowered or " 503 " in lowered:
         return "GLM 5.2 is unavailable (provider 503). Try again in a moment."
     if "customer_verification_required" in lowered:
@@ -1176,14 +1187,29 @@ class Handler(BaseHTTPRequestHandler):
             self._local_reply(prompt, ws, emit)
             return
         perm = clean_perm(payload.get("perm") or ("yolo" if payload.get("yolo", True) else "auto"))
-        self._run_fxs(
-            prompt,
-            ws,
-            str(payload.get("resume") or ""),
-            perm,
-            payload.get("images") if isinstance(payload.get("images"), list) else [],
-            emit,
-        )
+        stop_ping = threading.Event()
+
+        def ping() -> None:
+            while not stop_ping.wait(1.0):
+                with emit_lock:
+                    try:
+                        self.wfile.write(b": ping\n\n")
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        return
+
+        threading.Thread(target=ping, daemon=True).start()
+        try:
+            self._run_fxs(
+                prompt,
+                ws,
+                str(payload.get("resume") or ""),
+                perm,
+                payload.get("images") if isinstance(payload.get("images"), list) else [],
+                emit,
+            )
+        finally:
+            stop_ping.set()
 
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
@@ -1221,7 +1247,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
         perm = clean_perm(perm)
-        base = ["ask", "--json", "--no-color"]
+        # --json buffers the whole turn; raw stdout streams tokens as they land.
+        base = ["ask", "--no-color"]
         if perm == "yolo":
             base.append("--yolo")
         resume_flag: list[str] = []
@@ -1295,8 +1322,6 @@ class Handler(BaseHTTPRequestHandler):
                     step = parse_step(line)
                     if not step:
                         continue
-                    if step.get("status") == "running" and not (step.get("path") or step.get("detail")):
-                        continue
                     if resume_flag:
                         pending_steps.append(step)
                     else:
@@ -1306,14 +1331,17 @@ class Handler(BaseHTTPRequestHandler):
             t = threading.Thread(target=pump_err, daemon=True)
             t.start()
             chunks: list[str] = []
+            streamed_out = False
             assert proc.stdout is not None
             while True:
-                chunk = proc.stdout.read(256)
+                chunk = proc.stdout.read(64)
                 if not chunk:
                     break
                 piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
                 if piece:
                     chunks.append(piece)
+                    emit({"type": "token", "text": piece})
+                    streamed_out = True
             proc.wait()
             t.join(timeout=1)
             with PROC_LOCK:
@@ -1332,7 +1360,7 @@ class Handler(BaseHTTPRequestHandler):
             emit(step)
             streamed_steps.append(step)
         data = extract_json(raw_out) or extract_json(err_text)
-        emitted = False
+        emitted = streamed_out
         if isinstance(data, dict):
             tools = data.get("tool_calls") or []
             seen_kinds = {s.get("kind") for s in streamed_steps}
@@ -1347,14 +1375,14 @@ class Handler(BaseHTTPRequestHandler):
             if data.get("model"):
                 emit({"type": "model", "id": data["model"]})
             out = data.get("output") or ""
-            if out:
+            if out and not streamed_out:
                 emit({"type": "token", "text": str(out)})
                 emitted = True
             err = data.get("error")
-            if err and not out:
+            if err:
                 emit({"type": "error", "text": recover_error(raw_out, err_text)})
                 emitted = True
-        elif raw_out.strip():
+        elif raw_out.strip() and not streamed_out:
             kept = []
             for line in raw_out.splitlines(True):
                 if FXS_LINE.match(line):
@@ -1364,11 +1392,28 @@ class Handler(BaseHTTPRequestHandler):
             if text:
                 emit({"type": "token", "text": "".join(kept)})
                 emitted = True
+        try:
+            sessions = list_sessions(ws)
+        except Exception:
+            sessions = []
+        now = time.time()
+        for s in sessions:
+            sid = str(s.get("id") or "")
+            if not sid or sid.startswith("e2e-"):
+                continue
+            if now - int(s.get("mtime") or 0) > 180:
+                continue
+            emit({"type": "session", "id": sid})
+            break
+        if MODEL:
+            emit({"type": "model", "id": MODEL})
         if proc is not None and proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
                 emit({"type": "step", "id": "run", "kind": "status",
                       "label": "Stopped", "status": "warn"})
             elif not emitted:
+                emit({"type": "error", "text": recover_error(raw_out, err_text)})
+            elif err_text and "MalformedProviderResultIdentity" in err_text:
                 emit({"type": "error", "text": recover_error(raw_out, err_text)})
         elif not emitted and (raw_out.strip() or err_text.strip()):
             emit({"type": "error", "text": recover_error(raw_out, err_text)})

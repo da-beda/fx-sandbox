@@ -1112,6 +1112,7 @@
     [/^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$/i, "write"],
     [/^(running|ran|executing)\b(?:\s+command)?\s*(.*)$/i, "run"],
     [/^(searching|searched|search|grepping|grep)\b\s*(.*)$/i, "search"],
+    [/^(fetching|fetched|fetch|converting|converted)\b\s*(.*)$/i, "web"],
     [/^(loading|loaded)\s+(?:skill\s+)?(.*)$/i, "skill"],
     [/^(viewing|viewed)\b\s*(.*)$/i, "image"],
   ];
@@ -1178,7 +1179,10 @@
     if (kind === "read") return { verb: counted("Read", n, "file", "files"), aria: "Read " + n + (n === 1 ? " file" : " files") };
     if (kind === "write") return { verb: counted("Edited", n, "file", "files"), aria: "Edited " + n + (n === 1 ? " file" : " files") };
     if (kind === "search") return { verb: counted("Ran", n, "search", "searches"), aria: "Ran " + n + (n === 1 ? " search" : " searches") };
-    if (kind === "web") return { verb: counted("Fetched", n, "page", "pages"), aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
+    if (kind === "web") {
+      const url = snippet.replace(/^(Fetched|Fetching|Converted|Converting)\s+/i, "");
+      return { verb: counted("Fetched", n, "page", "pages"), det: n === 1 ? url : "", aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
+    }
     if (kind === "list") return { verb: counted("Listed", n, "folder", "folders"), aria: "Listed " + n + (n === 1 ? " folder" : " folders") };
     if (kind === "delete") return { verb: counted("Deleted", n, "file", "files"), aria: "Deleted " + n + (n === 1 ? " file" : " files") };
     if (kind === "skill") return { verb: counted("Loaded", n, "skill", "skills"), aria: "Loaded " + n + (n === 1 ? " skill" : " skills") };
@@ -1305,7 +1309,6 @@
             apply(same, step, stepItems(same));
             return;
           }
-          if (step.status === "running") return;
         }
         if (last && canMerge(last, step)) {
           const items = stepItems(last);

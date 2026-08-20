@@ -213,6 +213,30 @@ class Steps(unittest.TestCase):
         self.assertEqual(s["status"], "running")
         self.assertEqual(s["path"], "web")
 
+    def test_progress_fetching(self):
+        s = server.parse_step("Fetching https://example.com/")
+        self.assertEqual(s["kind"], "web")
+        self.assertEqual(s["detail"], "https://example.com/")
+        self.assertEqual(s["status"], "ok")
+
+    def test_progress_searching_pathless(self):
+        s = server.parse_step("● Searching")
+        self.assertEqual(s["kind"], "search")
+        self.assertEqual(s["status"], "running")
+
+    def test_tool_web_fetch_nested(self):
+        s = server.tool_step({
+            "name": "web_fetch",
+            "status": "success",
+            "web_fetch": {"url": "https://example.com/", "status": 200},
+        })
+        self.assertEqual(s["kind"], "web")
+        self.assertIn("example.com", s["detail"])
+
+    def test_malformed_identity(self):
+        msg = server.recover_error("", "fx: MalformedProviderResultIdentity")
+        self.assertIn("tool", msg.lower())
+
     def test_progress_pathless_dropped_into_kind(self):
         s = server.parse_step("● Reading")
         self.assertEqual(s["kind"], "read")
