@@ -36,7 +36,12 @@
     abort: null,
     model: "",
     modelLabel: "",
-    filesOn: localStorage.getItem("fxs.filesOn") !== "0",
+    filesOn: (() => {
+      const v = localStorage.getItem("fxs.filesOn");
+      if (v === "1") return true;
+      if (v === "0") return false;
+      return !window.matchMedia("(max-width: 720px)").matches;
+    })(),
     expanded: new Set(JSON.parse(localStorage.getItem("fxs.expanded") || "[]")),
     tree: [],
     treeCursor: "",
@@ -666,6 +671,7 @@
       if (agent) {
         if (!state.live) agent.textContent = "Local";
         else if (s.key === false) agent.textContent = "No key";
+        else if (s.backend === "native") agent.textContent = "Native";
         else agent.textContent = "Ready";
         agent.classList.toggle("warn", state.live && s.key === false);
       }

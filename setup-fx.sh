@@ -101,6 +101,9 @@ COMMANDS
   run  [fx-args…]      Sandboxed fx against $PWD (default for `fxs`)
   ask  [fx-args…]      One-shot: run -- fx ask …
   sessions             List fxs sessions for this directory
+  models               fx models (sandbox, or native if Docker is down)
+  usage | credits      Local spend / AI Gateway balance
+  pr | issue           Draft a PR or GitHub issue
   build                Build the fx-sandbox Docker image
   status               What is installed, keyed, and running
   key                  (Re)prompt for a Vercel AI Gateway key
@@ -140,7 +143,7 @@ parse_args() {
         CMD="$1"
         shift
         ;;
-      sessions|session)
+      sessions|session|models|usage|credits|balance|permissions|pr|issue|workspace)
         CMD="run"
         RUN_ARGS=("$@")
         return 0
@@ -718,6 +721,7 @@ FLAGS
   --image NAME           default fx-sandbox:latest
   --allow-yolo           Yolo (default). Same as FXS_YOLO=1
   --no-yolo              Ask before tools (fx auto/ask)
+  --perm ask|auto|yolo   Permission mode (default yolo)
   --dry-run              Print the docker argv and exit
   -h, --help
 
@@ -830,8 +834,16 @@ while [[ $# -gt 0 ]]; do
     --pids) PIDS="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
     --pull) PULL=1; shift ;;
-    --allow-yolo) ALLOW_YOLO=1; shift ;;
-    --no-yolo|--ask) ALLOW_YOLO=0; shift ;;
+    --allow-yolo) ALLOW_YOLO=1; FX_PERMISSION_MODE=yolo; shift ;;
+    --no-yolo|--ask) ALLOW_YOLO=0; FX_PERMISSION_MODE="${FX_PERMISSION_MODE:-auto}"; shift ;;
+    --perm)
+      [[ $# -ge 2 ]] || die "--perm is ask, auto, or yolo"
+      case "$2" in
+        ask|auto) ALLOW_YOLO=0; FX_PERMISSION_MODE="$2"; shift 2 ;;
+        yolo) ALLOW_YOLO=1; FX_PERMISSION_MODE=yolo; shift 2 ;;
+        *) die "--perm is ask, auto, or yolo" ;;
+      esac
+      ;;
     --dry-run) DRY=1; shift ;;
     --) shift; FX_ARGS+=("$@"); break ;;
     --yolo)
@@ -849,24 +861,97 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+find_fx() {
+  if command -v fx >/dev/null 2>&1; then
+    command -v fx
+    return 0
+  fi
+  if [[ -x "${HOME}/.local/bin/fx" ]]; then
+    printf '%s\n' "${HOME}/.local/bin/fx"
+    return 0
+  fi
+  return 1
+}
+
+load_fx_env() {
+  if [[ -z "${AI_GATEWAY_API_KEY:-}" && -r "${HOME}/.config/fx/env" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${HOME}/.config/fx/env"
+    set +a
+  fi
+}
+
+# Docker is optional: if it is missing, idle, or we are root (the
+# wrapper refuses to map uid 0), fall through to native fx.
+native_fx_exec() {
+  local fx_bin
+  fx_bin="$(find_fx)" || return 1
+  load_fx_env
+  WORKSPACE="$(abs_path "$WORKSPACE")"
+  [[ -d "$WORKSPACE" ]] || die "workspace is not a directory: ${WORKSPACE}"
+  is_dangerous_workspace "$WORKSPACE" && die "refusing ${WORKSPACE} (too broad / sensitive). pick a project directory."
+  cd "$WORKSPACE" || die "cannot cd ${WORKSPACE}"
+  if [[ ${#FX_ARGS[@]} -gt 0 && "${FX_ARGS[0]}" == "fx" ]]; then
+    FX_ARGS=("${FX_ARGS[@]:1}")
+  fi
+  if [[ ${ALLOW_YOLO:-1} -eq 1 ]]; then
+    export FX_PERMISSION_MODE="${FX_PERMISSION_MODE:-yolo}"
+    local _saw_ask=0 _have=0 a
+    local -a _kept=()
+    for a in "${FX_ARGS[@]+"${FX_ARGS[@]}"}"; do
+      case "$a" in
+        ask) _saw_ask=1; _kept+=("$a") ;;
+        --yolo) _have=1; _kept+=("$a") ;;
+        *) _kept+=("$a") ;;
+      esac
+    done
+    if [[ $_saw_ask -eq 1 && $_have -eq 0 ]]; then
+      local -a _out=()
+      for a in "${_kept[@]+"${_kept[@]}"}"; do
+        _out+=("$a")
+        [[ "$a" == "ask" ]] && _out+=("--yolo")
+      done
+      _kept=("${_out[@]+"${_out[@]}"}")
+    fi
+    FX_ARGS=("${_kept[@]+"${_kept[@]}"}")
+  else
+    export FX_PERMISSION_MODE="${FX_PERMISSION_MODE:-auto}"
+  fi
+  export FX_MODEL="${FX_MODEL:-zai/glm-5.2}"
+  if [[ $DRY -eq 1 ]]; then
+    printf '%q' "$fx_bin"
+    if [[ ${#FX_ARGS[@]} -gt 0 ]]; then printf ' %q' "${FX_ARGS[@]}"; fi
+    printf '\n'
+    exit 0
+  fi
+  log "native fx — Docker unavailable or running as root (${fx_bin})"
+  exec "$fx_bin" "${FX_ARGS[@]+"${FX_ARGS[@]}"}"
+}
+
 command -v docker >/dev/null 2>&1 || {
+  native_fx_exec
   printf 'fxs: error: docker is not on PATH\n' >&2
   printf '  macOS : brew install --cask docker && open -a Docker\n' >&2
   printf '  Linux : fxs install --with-docker\n' >&2
-  printf '  native: on macOS, skip Docker — fx already uses the OS sandbox\n' >&2
+  printf '  native: install fx (https://fx.sh) to run without Docker\n' >&2
   exit 1
 }
 
 if ! docker info >/dev/null 2>&1; then
+  native_fx_exec
   printf 'fxs: error: Docker is installed but the daemon is not running\n' >&2
   printf '  macOS : open -a Docker   # wait until the whale is idle\n' >&2
   printf '          then: docker info && fxs run\n' >&2
   printf '  Linux : sudo systemctl start docker\n' >&2
-  printf '  native: on macOS you can skip Docker:  fx ask --no-save "hi"\n' >&2
+  printf '  native: install fx (https://fx.sh) to run without Docker\n' >&2
   exit 1
 fi
 
-[[ "$(id -u)" -eq 0 ]] && die "do not run this wrapper as root; it would map uid 0 into the container"
+if [[ "$(id -u)" -eq 0 ]]; then
+  native_fx_exec
+  die "do not run this wrapper as root; it would map uid 0 into the container"
+fi
 
 WORKSPACE="$(abs_path "$WORKSPACE")"
 [[ -d "$WORKSPACE" ]] || die "workspace is not a directory: ${WORKSPACE}"
@@ -1216,12 +1301,24 @@ write_file() {
 
 write_kit() {
   local dest="${1:-}"
+  local src_dir="" src="${BASH_SOURCE[0]:-}"
   [[ -n "$dest" ]] || dest="$(kit_dest)"
   mkdir -p "$dest/config"
   log "writing embedded kit -> ${dest}"
   emit_dockerfile     | write_file "${dest}/Dockerfile"
   emit_entrypoint     | write_file "${dest}/entrypoint.sh"
-  emit_runfx          | write_file "${dest}/run-fx.sh"
+  # Prefer the checkout's run-fx.sh so git work and the heredoc cannot drift.
+  if [[ -n "$src" ]]; then
+    if [[ -L "$src" ]] && command -v readlink >/dev/null 2>&1; then
+      src="$(readlink -f "$src" 2>/dev/null || readlink "$src")"
+    fi
+    src_dir="$(cd "$(dirname "$src")" && pwd -P 2>/dev/null || true)"
+  fi
+  if [[ -n "$src_dir" && -f "${src_dir}/run-fx.sh" ]]; then
+    cp "${src_dir}/run-fx.sh" "${dest}/run-fx.sh"
+  else
+    emit_runfx | write_file "${dest}/run-fx.sh"
+  fi
   emit_compose        | write_file "${dest}/docker-compose.yml"
   emit_settings       | write_file "${dest}/config/settings.json"
   emit_workspace_fx   | write_file "${dest}/config/workspace.fx.json"
