@@ -28,7 +28,7 @@
     workspace: localStorage.getItem("fxs.workspace") || "",
     busy: false,
     live: false,
-    resume: localStorage.getItem("fxs.resume") || "last",
+    resume: localStorage.getItem("fxs.resume") || "",
     perm: localStorage.getItem("fxs.perm") || "yolo",
     theme: localStorage.getItem("fxs.theme") || "system",
     history: JSON.parse(localStorage.getItem("fxs.history") || "[]"),
@@ -866,7 +866,7 @@
         body: JSON.stringify({
           prompt: text,
           workspace: state.workspace,
-          resume: state.resume || "last",
+          resume: state.resume || "",
           perm: state.perm,
         }),
       });
@@ -889,6 +889,8 @@
             acc += ev.text || "";
             bot.classList.remove("pending");
             bot.innerHTML = render(acc);
+          } else if (ev.type === "activity" && ev.text && !acc) {
+            bot.textContent = ev.text;
           } else if (ev.type === "tools" && ev.tools) {
             const row = addMsg("tools", toolsHtml(ev.tools));
             thread.insertBefore(row, bot);

@@ -68,10 +68,31 @@ def load_env_file() -> None:
 
 
 load_env_file()
+MODEL = os.environ.get("FX_MODEL", MODEL)
 
 
 def which(name: str) -> str | None:
     return shutil.which(name)
+
+
+def fxs_bin() -> str | None:
+    return which("fxs") or which("run-fx")
+
+
+def fx_bin() -> str | None:
+    return which("fx")
+
+
+def agent() -> tuple[str, str]:
+    fxs = fxs_bin()
+    fx = fx_bin()
+    if fxs and docker_state() == "running":
+        return "fxs", fxs
+    if fx:
+        return "fx", fx
+    if fxs:
+        return "fxs", fxs
+    return "", ""
 
 
 def local_mode() -> bool:
@@ -79,7 +100,7 @@ def local_mode() -> bool:
         return True
     if os.environ.get("FXS_UI_LOCAL") == "0":
         return False
-    return which("fxs") is None and which("docker") is None
+    return not agent()[0]
 
 
 def workspace_ok(path: str) -> str:
@@ -332,26 +353,26 @@ def extract_json(text: str):
     return None
 
 
-def fxs_bin() -> str | None:
-    return which("fxs") or which("run-fx")
-
-
 def clean_perm(raw) -> str:
     p = str(raw or "yolo")
     return p if p in ("ask", "auto", "yolo") else "yolo"
 
 
 def run_fxs(ws: str, fx_args: list[str], perm: str = "yolo", timeout: int = 90) -> subprocess.CompletedProcess:
-    bin_ = fxs_bin()
+    kind, bin_ = agent()
     if not bin_:
-        raise FileNotFoundError("fxs is not on PATH")
-    cmd = [bin_, "run", "-w", ws]
-    if perm != "yolo":
-        cmd.append("--no-yolo")
-    cmd += ["--"] + fx_args
+        raise FileNotFoundError("fx is not on PATH")
+    if kind == "fxs":
+        cmd = [bin_, "run", "-w", ws]
+        if perm != "yolo":
+            cmd.append("--no-yolo")
+        cmd += ["--"] + fx_args
+    else:
+        cmd = [bin_] + fx_args
     env = os.environ.copy()
     env["FX_MODEL"] = MODEL
     env["FX_PERMISSION_MODE"] = perm
+    env.setdefault("FX_DISABLE_KEYCHAIN", "1")
     return subprocess.run(
         cmd, capture_output=True, timeout=timeout, cwd=ws, env=env, text=True,
     )
@@ -445,6 +466,8 @@ class Handler(BaseHTTPRequestHandler):
                 "key": has_key(),
                 "docker": docker_state(),
                 "fxs": bool(which("fxs")),
+                "fx": bool(which("fx")),
+                "agent": agent()[0] or None,
             })
             return
         if u.path == "/api/sessions":
@@ -675,18 +698,25 @@ class Handler(BaseHTTPRequestHandler):
         emit({"type": "done"})
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
-        bin_ = fxs_bin()
+        kind, bin_ = agent()
         if not bin_:
-            emit({"type": "error", "text": "fxs is not on PATH"})
+            emit({"type": "error", "text": "fx is not on PATH"})
             emit({"type": "done"})
             return
         perm = clean_perm(perm)
-        cmd = [bin_, "run", "-w", ws]
-        if perm != "yolo":
-            cmd.append("--no-yolo")
-        cmd += ["--", "ask", "--json"]
-        if perm == "yolo":
-            cmd.append("--yolo")
+        if kind == "fxs":
+            cmd = [bin_, "run", "-w", ws]
+            if perm != "yolo":
+                cmd.append("--no-yolo")
+            cmd += ["--", "ask", "--json"]
+            if perm == "yolo":
+                cmd.append("--yolo")
+        else:
+            cmd = [bin_, "ask", "--json"]
+            if perm == "yolo":
+                cmd.append("--yolo")
+            elif perm == "auto":
+                cmd.append("--auto")
         if resume:
             cmd += ["--resume", resume]
         for img in images[:4]:
@@ -703,6 +733,7 @@ class Handler(BaseHTTPRequestHandler):
         env = os.environ.copy()
         env["FX_MODEL"] = MODEL
         env["FX_PERMISSION_MODE"] = perm
+        env.setdefault("FX_DISABLE_KEYCHAIN", "1")
         try:
             proc = subprocess.Popen(
                 cmd,

@@ -110,7 +110,10 @@ Chat in the middle. A collapsible **Files** sidebar on the right is the workspac
 
 `⌘B` files, `⌘S` save, `⌘P` filter, `⌘N` new chat, `⌘,` settings. Type `/` for commands, `@` for files (⇧Enter opens). Tool chips and `@path` in replies open the editor.
 
-`--bind-all` / `--port` if you need them. `--offline` when Docker is not up.
+`--bind-all` / `--port` if you need them. `--offline` stays local with no model.
+
+If Docker is not running, the UI talks to native `fx` instead. Same key, same model (`zai/glm-5.2` by default).
+
 
 Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 
