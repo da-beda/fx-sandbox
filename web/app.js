@@ -56,12 +56,7 @@
     abort: null,
     model: "",
     modelLabel: "",
-    filesOn: (() => {
-      const v = localStorage.getItem("fxs.filesOn");
-      if (v === "1") return true;
-      if (v === "0") return false;
-      return !window.matchMedia("(max-width: 720px)").matches;
-    })(),
+    filesOn: localStorage.getItem("fxs.filesOn") === "1",
     expanded: new Set(JSON.parse(localStorage.getItem("fxs.expanded") || "[]")),
     tree: [],
     treeCursor: "",
@@ -70,6 +65,7 @@
     wrap: localStorage.getItem("fxs.wrap") !== "0",
     filesW: clampW(parseInt(localStorage.getItem("fxs.filesW") || "340", 10)),
     editing: false,
+    status: null,
   };
   if (localStorage.getItem("fxs.yolo") === "0" && !localStorage.getItem("fxs.perm")) {
     state.perm = "auto";
@@ -223,11 +219,13 @@
     $("files-btn").setAttribute("aria-expanded", on ? "true" : "false");
     filesEl.style.setProperty("--files-w", state.filesW + "px");
     if (on) {
+      openChrome();
       applyWrap();
       if (!state.tree.length) loadTree();
       else renderTree();
     } else {
       showEditor(false);
+      if (!thread.querySelector(".msg.user, .msg.assistant")) closeChrome();
     }
   }
 
@@ -516,6 +514,7 @@
     { id: "models", hint: "Switch model" },
     { id: "permissions", hint: "Ask, auto, yolo" },
     { id: "resume", hint: "Sessions" },
+    { id: "debug", hint: "Diagnostics" },
     { id: "status", hint: "Runtime" },
     { id: "usage", hint: "Spend" },
     { id: "credits", hint: "Balance" },
@@ -782,6 +781,7 @@
     try {
       const q = state.workspace ? "?workspace=" + encodeURIComponent(state.workspace) : "";
       const s = await (await fetch("/api/status" + q)).json();
+      state.status = s;
       state.live = s.live !== false;
       state.model = s.model || state.model;
       const def = s.default_workspace || s.workspace;
@@ -790,21 +790,73 @@
       }
       if (state.modelLabel) $("model-val").textContent = state.modelLabel;
       else $("model-val").textContent = modelName(state.model) || "—";
-      const agent = $("agent-val");
-      if (agent) {
-        if (!state.live) agent.textContent = "Local";
-        else if (s.key === false) agent.textContent = "No key";
-        else if (s.backend === "native") agent.textContent = "Native";
-        else agent.textContent = "Ready";
-        agent.classList.toggle("warn", state.live && s.key === false);
-      }
+      paintDiagnostics(s);
     } catch {
-      const agent = $("agent-val");
-      if (agent) {
-        agent.textContent = "Unreachable";
-        agent.classList.add("warn");
-      }
+      state.status = null;
+      paintDiagnostics(null);
     }
+  }
+
+  function paintDiagnostics(s) {
+    const keyRow = $("key-row");
+    if (keyRow) keyRow.hidden = !s || s.key !== false;
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    if (!s) {
+      set("diag-backend", "unreachable");
+      set("diag-model", "—");
+      set("diag-session", state.resume || "—");
+      set("diag-docker", "—");
+      set("diag-bins", "—");
+      return;
+    }
+    set("diag-backend", s.backend || "—");
+    set("diag-model", s.model || state.model || "—");
+    set("diag-session", state.resume && state.resume !== "last" ? state.resume : "last");
+    set("diag-docker", s.docker || "—");
+    const bins = [];
+    if (s.fx) bins.push("fx");
+    if (s.fxs) bins.push("fxs");
+    set("diag-bins", bins.join(" · ") || "none");
+  }
+
+  function flashCopy(id) {
+    const el = $(id);
+    if (!el) return;
+    const label = el.querySelector(".cell-k") || el;
+    const prev = label.textContent;
+    label.textContent = "Copied";
+    setTimeout(() => { label.textContent = prev; }, 900);
+  }
+
+  async function copyText(text, ackId) {
+    try {
+      await navigator.clipboard.writeText(text);
+      flashCopy(ackId);
+    } catch { /* ignore */ }
+  }
+
+  function diagnosticsText() {
+    const s = state.status || {};
+    return [
+      "fxs",
+      "backend: " + (s.backend || "unknown"),
+      "model: " + (s.model || state.model || "—"),
+      "key: " + (s.key === true ? "set" : s.key === false ? "missing" : "—"),
+      "workspace: " + (state.workspace || "—"),
+      "session: " + (state.resume || "—"),
+      "docker: " + (s.docker || "—"),
+      "fx: " + (s.fx ? "yes" : "no"),
+      "fxs: " + (s.fxs ? "yes" : "no"),
+    ].join("\n") + "\n";
+  }
+
+  function chatText() {
+    return [...thread.querySelectorAll(".msg")].map((el) => {
+      const kind = el.classList.contains("user") ? "user"
+        : el.classList.contains("assistant") ? "assistant"
+        : "sys";
+      return kind.toUpperCase() + "\n" + (el.innerText || "").trim();
+    }).filter((b) => b.split("\n")[1]).join("\n\n");
   }
 
   function ago(ts) {
@@ -957,16 +1009,19 @@
     }
   }
 
-  async function openSettings() {
+  async function openSettings(opts) {
     folderInput.value = state.workspace;
     $("model-list").hidden = true;
     $("model-val").textContent = modelName(state.model) || "—";
     setPerm(state.perm);
     applyTheme();
+    const adv = $("advanced");
+    if (adv) adv.open = !!(opts && opts.advanced);
     await loadModels();
     await Promise.all([loadSessions(), refreshStatus()]);
     if (!settings.open) settings.showModal();
-    folderInput.focus();
+    if (opts && opts.advanced && adv) adv.scrollIntoView({ block: "nearest" });
+    else folderInput.focus();
   }
 
   function commitFolder() {
@@ -982,6 +1037,7 @@
     if (id === "clear" || id === "new") { newSession(); return; }
     if (id === "files") { showFiles(true); return; }
     if (id === "settings" || id === "resume") { openSettings(); return; }
+    if (id === "debug" || id === "advanced") { openSettings({ advanced: true }); return; }
     if (id === "models") {
       await openSettings();
       $("model-list").hidden = false;
@@ -1199,6 +1255,13 @@
       e.preventDefault();
       openSettings();
     }
+    if (!mod && e.key === "?" && !e.repeat) {
+      const tag = (document.activeElement && document.activeElement.tagName) || "";
+      if (tag !== "INPUT" && tag !== "TEXTAREA") {
+        e.preventDefault();
+        openSettings({ advanced: true });
+      }
+    }
     if (mod && e.key.toLowerCase() === "n") {
       e.preventDefault();
       newSession();
@@ -1259,11 +1322,15 @@
     if (path) openFile(path);
   });
 
-  $("more").addEventListener("click", openSettings);
+  $("more").addEventListener("click", () => openSettings());
   $("new-btn").addEventListener("click", newSession);
   $("files-btn").addEventListener("click", toggleFiles);
   $("files-close").addEventListener("click", () => showFiles(false));
   $("settings-close").addEventListener("click", () => settings.close());
+  const copyDiag = $("copy-diag");
+  if (copyDiag) copyDiag.addEventListener("click", () => copyText(diagnosticsText(), "copy-diag"));
+  const copyChat = $("copy-chat");
+  if (copyChat) copyChat.addEventListener("click", () => copyText(chatText() || "No chat yet.", "copy-chat"));
   veil.addEventListener("click", () => showFiles(false));
   $("ed-back").addEventListener("click", closeEditor);
   $("ed-save").addEventListener("click", saveFile);

@@ -205,8 +205,8 @@ body.welcome .actions {
   margin: 0;
 }
 body.welcome .brand {
-  width: 154px;
-  height: 111px;
+  width: 120px;
+  height: 86px;
 }
 body.welcome .stage {
   opacity: 0;
@@ -214,10 +214,9 @@ body.welcome .stage {
   transition: opacity 120ms var(--ease);
 }
 body.welcome .composer {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--fg) 3%, transparent),
-    0 10px 40px color-mix(in srgb, var(--fg) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 3%, transparent);
 }
+body.welcome #new-btn { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .shimmer-band,
@@ -555,6 +554,14 @@ button.step[data-path]:hover .ico { color: var(--fg); }
 .cell-k { font-size: 15px; }
 .cell-v { color: var(--muted); font-size: 15px; }
 .cell-v.warn { color: var(--warn); }
+.cell-v.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 58%;
+}
 .cell input {
   font-family: var(--mono);
   font-size: 12.5px;
@@ -623,12 +630,53 @@ button.step[data-path]:hover .ico { color: var(--fg); }
   font-size: 13px;
 }
 
+.advanced {
+  padding-bottom: 4px;
+}
+.advanced > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform var(--quick) var(--ease);
+}
+.advanced[open] > summary::after {
+  transform: rotate(-135deg);
+}
+.advanced > summary:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.advanced .cell { border-top: 1px solid var(--line); }
+.hint-row {
+  margin: 0;
+  padding: 10px 14px 14px;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
 @media (max-width: 480px) {
   .icon { width: 44px; height: 44px; }
   .send { width: 36px; height: 36px; }
   .dock { padding-inline: 12px; }
   .thread { padding-inline: 16px; }
-  body.welcome .brand { width: 132px; height: 96px; }
+  body.welcome .brand { width: 108px; height: 78px; }
   body.welcome .top { padding-bottom: 18px; }
 }
 

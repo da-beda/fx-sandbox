@@ -77,5 +77,17 @@ class Perm(unittest.TestCase):
         self.assertEqual(server.clean_perm("nope"), "yolo")
 
 
+class ReleaseCopy(unittest.TestCase):
+    def test_no_demo_in_ui_copy(self):
+        here = Path(__file__).resolve().parent
+        blob = "\n".join(
+            p.read_text(encoding="utf-8")
+            for p in [here / "server.py", here / "index.html", here / "app.js"]
+        ).lower()
+        self.assertNotIn("--demo", blob)
+        self.assertNotIn("demo", blob)
+        self.assertNotIn("sample", blob)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -117,11 +117,11 @@ Opens a local page. No npm. Python 3 stdlib. `python3 web/test_server.py` covers
 
 Chat in the middle. While the agent runs, a quiet activity trail shows what it is doing (reads, commands, waits) and how long it has been working — so a long turn never looks stuck. A collapsible **Files** sidebar on the right is the workspace the agent sees — click a file to edit it in that same pane, chevron to go back to the tree.
 
-`⌘B` files, `⌘S` save, `⌘P` filter, `⌘N` new chat, `⌘,` settings. Type `/` for commands, `@` for files (⇧Enter opens). Tool chips and `@path` in replies open the editor.
+`⌘B` files, `⌘S` save, `⌘P` filter, `⌘N` new chat, `⌘,` settings, `?` advanced. Type `/` for commands, `@` for files (⇧Enter opens). Tool chips and `@path` in replies open the editor.
 
 `--bind-all` / `--port` if you need them. `--offline` forces the local mock (no model).
 
-When Docker is not running, the UI talks to native `fx` instead — live, not a demo. Default model is `zai/glm-5.2` (the normal variant, not fast).
+When Docker is not running, the UI talks to native `fx`. Default model is `zai/glm-5.2` (the normal variant, not fast).
 
 Not a fork of Vercel’s coding-agent-template — that stack is a multi-user cloud product. This is one folder, one agent, one page.
 

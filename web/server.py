@@ -1043,7 +1043,7 @@ def pick_host_port() -> tuple[str, int]:
             host = argv[i + 1]; i += 2; continue
         if a in ("--port", "-p") and i + 1 < len(argv):
             port = int(argv[i + 1]); i += 2; continue
-        if a in ("--offline", "--local", "--demo"):
+        if a in ("--offline", "--local"):
             os.environ["FXS_UI_LOCAL"] = "1"; i += 1; continue
         if a == "--bind-all":
             host = "0.0.0.0"; i += 1; continue
