@@ -63,9 +63,11 @@ TOOL_KIND = {
     "shell": ("run", "Ran"),
     "exec": ("run", "Ran"),
     "command": ("run", "Ran"),
+    "terminal": ("run", "Ran"),
     "web_search": ("web", "Searched"),
     "web_fetch": ("web", "Fetched"),
     "fetch": ("web", "Fetched"),
+    "perplexity_search": ("web", "Searched"),
     "subagent": ("agent", "Agent"),
     "vision": ("image", "Looked"),
     "ask_user_question": ("status", "Asked"),
@@ -155,6 +157,7 @@ PROGRESS = (
     (re.compile(r"^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$", re.I), "write", "Edited"),
     (re.compile(r"^(running|ran|executing|execute)\b(?:\s+command)?\s*(.*)$", re.I), "run", "Ran"),
     (re.compile(r"^(searching|searched|search|grepping|grep)\b\s*(.*)$", re.I), "search", "Searched"),
+    (re.compile(r"^(fetching|fetched|fetch|converting|converted)\b\s*(.*)$", re.I), "web", "Fetched"),
     (re.compile(r"^(loading|loaded)\s+(?:skill\s+)?(.*)$", re.I), "skill", "Loaded"),
     (re.compile(r"^(viewing|viewed)\b\s*(.*)$", re.I), "image", "Viewed"),
 )
@@ -256,11 +259,17 @@ def tool_step(tcall) -> dict:
     cmd = str(tcall.get("command") or tcall.get("cmd") or args.get("command") or args.get("cmd") or "")
     query = str(tcall.get("query") or tcall.get("pattern") or args.get("query") or args.get("pattern") or "")
     extra = path or cmd or query or rest
+    for nest in ("web_fetch", "perplexity_search", "web_search"):
+        blob = tcall.get(nest)
+        if isinstance(blob, dict):
+            extra = extra or str(blob.get("url") or blob.get("query") or "")
+            if not path and blob.get("url"):
+                path = str(blob["url"])
     if extra and not path and ("/" in extra or "." in extra) and " " not in extra:
         path = extra
     label = verb
     if extra:
-        shown = Path(extra).name if path else extra
+        shown = extra if extra.startswith("http") else (Path(extra).name if path else extra)
         label = f"{verb} {shorten(shown, 42)}".strip()
     st = str(tcall.get("status") or "ok").lower()
     if st in ("success", "ok", "completed", "done"):
@@ -719,7 +728,7 @@ def parse_models(text: str) -> list[dict]:
     return out
 
 
-def rank_models(found: list[dict], current: str) -> list[dict]:
+def rank_models(found: list[dict], current: str, prefer_free: bool = False) -> list[dict]:
     by_id: dict[str, dict] = {}
     for m in found:
         mid = m["id"]
@@ -727,7 +736,8 @@ def rank_models(found: list[dict], current: str) -> list[dict]:
             continue
         by_id[mid] = m
     out: list[dict] = []
-    for pid in PREFERRED_MODELS:
+    preferred = [] if prefer_free else PREFERRED_MODELS
+    for pid in preferred:
         if pid in by_id:
             m = by_id.pop(pid)
             label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), m.get("label") or pid.split("/")[-1])
@@ -735,11 +745,18 @@ def rank_models(found: list[dict], current: str) -> list[dict]:
         elif pid == current:
             label = next((c["label"] for c in CATALOG_MODELS if c["id"] == pid), pid.split("/")[-1])
             out.append({"id": pid, "label": label})
+    rest: list[dict] = []
     for m in found:
         if m["id"] in by_id:
-            out.append(by_id.pop(m["id"]))
+            rest.append(by_id.pop(m["id"]))
+    if prefer_free:
+        rest.sort(key=lambda m: (0 if gateway.is_free_model(m["id"]) else 1))
+        for m in rest:
+            if not m.get("label") or m["label"] == m["id"].split("/")[-1]:
+                m["label"] = gateway.model_label(m["id"])
+    out.extend(rest)
     if current and current not in {m["id"] for m in out}:
-        out.insert(0, {"id": current, "label": current.split("/")[-1]})
+        out.insert(0, {"id": current, "label": gateway.model_label(current) or current.split("/")[-1]})
     return out[:MAX_MODELS]
 
 
@@ -759,6 +776,8 @@ def recover_error(stdout: str, stderr: str) -> str:
         if code:
             return str(code)
     lowered = blob.lower()
+    if "malformedproviderresultidentity" in lowered.replace("_", "").replace(" ", ""):
+        return "The model called a tool fx does not expose. Try again."
     if "provider_unavailable" in lowered or "http 503" in lowered or " 503 " in lowered:
         return "GLM 5.2 is unavailable (provider 503). Try again in a moment."
     if "customer_verification_required" in lowered:
@@ -1003,7 +1022,7 @@ class Handler(BaseHTTPRequestHandler):
             if gateway.configured_upstream():
                 gateway.ensure_gateway()
                 ids = gateway.fetch_catalog()
-                models = [{"id": i, "label": i.split("/")[-1]} for i in ids]
+                models = [{"id": i, "label": gateway.model_label(i)} for i in ids]
             if not models:
                 ws = workspace_ok(ws)
                 r = run_fxs(ws, ["models", "--json"], timeout=60)
@@ -1015,9 +1034,13 @@ class Handler(BaseHTTPRequestHandler):
             models = []
         vercel = gateway.current_provider().get("vercel", True)
         fallback = list(CATALOG_MODELS) if vercel else (
-            [{"id": MODEL, "label": MODEL.split("/")[-1]}] if MODEL else []
+            [{"id": MODEL, "label": gateway.model_label(MODEL) or MODEL.split("/")[-1]}] if MODEL else []
         )
-        models = rank_models(models or fallback, MODEL)
+        models = rank_models(
+            models or fallback,
+            MODEL,
+            prefer_free=not vercel and gateway.current_provider().get("id") == "openrouter",
+        )
         if not models:
             models = fallback
         self._json(200, {"models": models, "current": MODEL})
@@ -1040,6 +1063,7 @@ class Handler(BaseHTTPRequestHandler):
         name = str(payload.get("provider") or payload.get("url") or "").strip()
         model = str(payload.get("model") or "").strip()
         api = str(payload.get("api") or "").strip()
+        key = str(payload.get("key") or "").strip()
         if not name:
             if api:
                 cur = gateway.current_provider()
@@ -1048,7 +1072,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, gateway.current_provider())
                 return
         try:
-            info = gateway.apply_provider(name, model, api=api)
+            info = gateway.apply_provider(name, model, api=api, key=key)
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return
@@ -1063,12 +1087,39 @@ class Handler(BaseHTTPRequestHandler):
 
     def _set_key(self, payload: dict) -> None:
         key = str(payload.get("key") or "").strip()
+        kind = str(payload.get("kind") or payload.get("name") or "").strip().lower()
         try:
-            info = gateway.store_api_key(key)
+            if kind == "perplexity" or key.startswith("pplx-"):
+                info = gateway.store_perplexity_key(key)
+            else:
+                info = gateway.store_api_key(key)
         except ValueError as e:
             self._json(400, {"error": str(e)})
             return
-        self._json(200, {"ok": True, "key": bool(info.get("key")), "provider": info.get("id")})
+        global MODEL
+        if info.get("model"):
+            MODEL = info["model"]
+            os.environ["FX_MODEL"] = MODEL
+        body = {
+            "ok": True,
+            "key": bool(info.get("key")),
+            "saved": True,
+            "provider": info.get("id"),
+            "id": info.get("id"),
+            "label": info.get("label"),
+            "model": info.get("model"),
+            "needs_key": info.get("needs_key"),
+            "url": info.get("url"),
+            "vercel": info.get("vercel"),
+            "api": info.get("api"),
+            "effective_api": info.get("effective_api"),
+            "providers": info.get("providers"),
+            "perplexity": info.get("perplexity"),
+            "gateway_search": info.get("gateway_search"),
+        }
+        if info.get("warn"):
+            body["warn"] = info["warn"]
+        self._json(200, body)
 
     def _fx(self, payload: dict) -> None:
         args = payload.get("args")
@@ -1142,14 +1193,29 @@ class Handler(BaseHTTPRequestHandler):
             self._local_reply(prompt, ws, emit)
             return
         perm = clean_perm(payload.get("perm") or ("yolo" if payload.get("yolo", True) else "auto"))
-        self._run_fxs(
-            prompt,
-            ws,
-            str(payload.get("resume") or ""),
-            perm,
-            payload.get("images") if isinstance(payload.get("images"), list) else [],
-            emit,
-        )
+        stop_ping = threading.Event()
+
+        def ping() -> None:
+            while not stop_ping.wait(1.0):
+                with emit_lock:
+                    try:
+                        self.wfile.write(b": ping\n\n")
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        return
+
+        threading.Thread(target=ping, daemon=True).start()
+        try:
+            self._run_fxs(
+                prompt,
+                ws,
+                str(payload.get("resume") or ""),
+                perm,
+                payload.get("images") if isinstance(payload.get("images"), list) else [],
+                emit,
+            )
+        finally:
+            stop_ping.set()
 
     def _local_reply(self, prompt: str, ws: str, emit) -> None:
         files = list_files(ws, "")[:12]
@@ -1187,7 +1253,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_fxs(self, prompt: str, ws: str, resume: str, perm: str, images: list, emit) -> None:
         perm = clean_perm(perm)
-        base = ["ask", "--json", "--no-color"]
+        # --json buffers the whole turn; raw stdout streams tokens as they land.
+        base = ["ask", "--no-color"]
         if perm == "yolo":
             base.append("--yolo")
         resume_flag: list[str] = []
@@ -1212,6 +1279,14 @@ class Handler(BaseHTTPRequestHandler):
         proc = None
         pending_steps: list[dict] = []
         attempt_resume = bool(resume_flag)
+        if not local_mode() and gateway.configured_upstream():
+            try:
+                gateway.load_env_file()
+                gateway.ensure_gateway()
+            except Exception as e:
+                emit({"type": "error", "text": str(e)})
+                emit({"type": "done"})
+                return
         while True:
             fx_args = base + resume_flag + img_flags + ["--", prompt]
             try:
@@ -1253,8 +1328,6 @@ class Handler(BaseHTTPRequestHandler):
                     step = parse_step(line)
                     if not step:
                         continue
-                    if step.get("status") == "running" and not (step.get("path") or step.get("detail")):
-                        continue
                     if resume_flag:
                         pending_steps.append(step)
                     else:
@@ -1264,14 +1337,17 @@ class Handler(BaseHTTPRequestHandler):
             t = threading.Thread(target=pump_err, daemon=True)
             t.start()
             chunks: list[str] = []
+            streamed_out = False
             assert proc.stdout is not None
             while True:
-                chunk = proc.stdout.read(256)
+                chunk = proc.stdout.read(64)
                 if not chunk:
                     break
                 piece = ANSI.sub("", chunk.decode("utf-8", errors="replace"))
                 if piece:
                     chunks.append(piece)
+                    emit({"type": "token", "text": piece})
+                    streamed_out = True
             proc.wait()
             t.join(timeout=1)
             with PROC_LOCK:
@@ -1290,7 +1366,7 @@ class Handler(BaseHTTPRequestHandler):
             emit(step)
             streamed_steps.append(step)
         data = extract_json(raw_out) or extract_json(err_text)
-        emitted = False
+        emitted = streamed_out
         if isinstance(data, dict):
             tools = data.get("tool_calls") or []
             seen_kinds = {s.get("kind") for s in streamed_steps}
@@ -1305,14 +1381,14 @@ class Handler(BaseHTTPRequestHandler):
             if data.get("model"):
                 emit({"type": "model", "id": data["model"]})
             out = data.get("output") or ""
-            if out:
+            if out and not streamed_out:
                 emit({"type": "token", "text": str(out)})
                 emitted = True
             err = data.get("error")
-            if err and not out:
+            if err:
                 emit({"type": "error", "text": recover_error(raw_out, err_text)})
                 emitted = True
-        elif raw_out.strip():
+        elif raw_out.strip() and not streamed_out:
             kept = []
             for line in raw_out.splitlines(True):
                 if FXS_LINE.match(line):
@@ -1322,11 +1398,28 @@ class Handler(BaseHTTPRequestHandler):
             if text:
                 emit({"type": "token", "text": "".join(kept)})
                 emitted = True
+        try:
+            sessions = list_sessions(ws)
+        except Exception:
+            sessions = []
+        now = time.time()
+        for s in sessions:
+            sid = str(s.get("id") or "")
+            if not sid or sid.startswith("e2e-"):
+                continue
+            if now - int(s.get("mtime") or 0) > 180:
+                continue
+            emit({"type": "session", "id": sid})
+            break
+        if MODEL:
+            emit({"type": "model", "id": MODEL})
         if proc is not None and proc.returncode not in (0, None):
             if proc.returncode and proc.returncode < 0:
                 emit({"type": "step", "id": "run", "kind": "status",
                       "label": "Stopped", "status": "warn"})
             elif not emitted:
+                emit({"type": "error", "text": recover_error(raw_out, err_text)})
+            elif err_text and "MalformedProviderResultIdentity" in err_text:
                 emit({"type": "error", "text": recover_error(raw_out, err_text)})
         elif not emitted and (raw_out.strip() or err_text.strip()):
             emit({"type": "error", "text": recover_error(raw_out, err_text)})

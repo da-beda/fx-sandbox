@@ -1112,6 +1112,7 @@
     [/^(writing|wrote|write|editing|edited|edit)\b\s*(.*)$/i, "write"],
     [/^(running|ran|executing)\b(?:\s+command)?\s*(.*)$/i, "run"],
     [/^(searching|searched|search|grepping|grep)\b\s*(.*)$/i, "search"],
+    [/^(fetching|fetched|fetch|converting|converted)\b\s*(.*)$/i, "web"],
     [/^(loading|loaded)\s+(?:skill\s+)?(.*)$/i, "skill"],
     [/^(viewing|viewed)\b\s*(.*)$/i, "image"],
   ];
@@ -1178,7 +1179,10 @@
     if (kind === "read") return { verb: counted("Read", n, "file", "files"), aria: "Read " + n + (n === 1 ? " file" : " files") };
     if (kind === "write") return { verb: counted("Edited", n, "file", "files"), aria: "Edited " + n + (n === 1 ? " file" : " files") };
     if (kind === "search") return { verb: counted("Ran", n, "search", "searches"), aria: "Ran " + n + (n === 1 ? " search" : " searches") };
-    if (kind === "web") return { verb: counted("Fetched", n, "page", "pages"), aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
+    if (kind === "web") {
+      const url = snippet.replace(/^(Fetched|Fetching|Converted|Converting)\s+/i, "");
+      return { verb: counted("Fetched", n, "page", "pages"), det: n === 1 ? url : "", aria: "Fetched " + n + (n === 1 ? " page" : " pages") };
+    }
     if (kind === "list") return { verb: counted("Listed", n, "folder", "folders"), aria: "Listed " + n + (n === 1 ? " folder" : " folders") };
     if (kind === "delete") return { verb: counted("Deleted", n, "file", "files"), aria: "Deleted " + n + (n === 1 ? " file" : " files") };
     if (kind === "skill") return { verb: counted("Loaded", n, "skill", "skills"), aria: "Loaded " + n + (n === 1 ? " skill" : " skills") };
@@ -1305,7 +1309,6 @@
             apply(same, step, stepItems(same));
             return;
           }
-          if (step.status === "running") return;
         }
         if (last && canMerge(last, step)) {
           const items = stepItems(last);
@@ -1432,13 +1435,13 @@
     state.providerLabel = p.label || "";
     state.api = p.api && p.api !== "vercel" ? p.api : "auto";
     paintApi(p);
+    paintKeyRow(p, s.key);
+    paintPplxRow(p);
     const urlRow = $("provider-url-row");
     if (urlRow) {
       urlRow.hidden = !p.url || p.id !== "custom";
       if (p.url && $("provider-url")) $("provider-url").value = p.url;
     }
-    const keyRow = $("key-row");
-    if (keyRow) keyRow.hidden = s.key !== false;
     set("diag-session", state.resume && state.resume !== "last" ? state.resume : "last");
     set("diag-docker", s.docker || "—");
     const bins = [];
@@ -1975,8 +1978,98 @@
     try { return new URL(url).host; } catch { return url || ""; }
   }
 
+  function pendingKey() {
+    const inp = $("key-input");
+    return (inp && inp.value.trim()) || "";
+  }
+
+  function paintKeyRow(p, hasKey) {
+    const keyRow = $("key-row");
+    if (!keyRow) return;
+    const cloud = !!(p && p.url && p.id !== "ollama" && p.id !== "lmstudio");
+    keyRow.hidden = !cloud;
+    const hint = $("key-hint");
+    if (hint) {
+      hint.textContent = hasKey
+        ? "Key is saved on this machine. Paste a new one to replace."
+        : "Save, Enter, or switch protocol. Kept on this machine, not in the project.";
+    }
+  }
+
+  function paintPplxRow(p) {
+    const hint = $("pplx-hint");
+    if (!hint) return;
+    if (p && p.perplexity) {
+      hint.textContent = "Perplexity key is saved. Search uses it even on OpenRouter. Paste a new one to replace.";
+    } else if (p && p.vercel) {
+      hint.textContent = "On Vercel, web search already uses AI Gateway. Optional pplx- key is used if you switch providers.";
+    } else if (p && p.id === "openrouter") {
+      hint.textContent = p.gateway_search
+        ? "Vercel search needs a card on that account, so search uses OpenRouter instead. Optional pplx- for Perplexity."
+        : "Search uses OpenRouter. Paste pplx- or vck_ to prefer those.";
+    } else if (p && p.gateway_search) {
+      hint.textContent = "Search uses your Vercel key via AI Gateway (that account needs a card). Paste pplx- to search without Vercel billing.";
+    } else {
+      hint.textContent = "pplx- or vck_ key. Used when the chat provider is not Vercel. Kept on this machine.";
+    }
+  }
+
+  async function savePplxKey(key) {
+    key = String(key || "").trim();
+    if (!key) return null;
+    const r = await fetch("/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, kind: "perplexity" }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const inp = $("pplx-input");
+    if (inp) inp.value = "";
+    if (data.warn) addMsg("sys", data.warn);
+    paintPplxRow(data);
+    paintHome();
+    await refreshStatus();
+    return data;
+  }
+
+  async function saveKey(key) {
+    key = String(key || "").trim();
+    if (!key) return null;
+    const r = await fetch("/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const inp = $("key-input");
+    if (inp) inp.value = "";
+    if (data.provider) {
+      state.provider = data.provider;
+      if (data.label) state.providerLabel = data.label;
+    }
+    if (data.model) {
+      state.model = data.model;
+      state.modelLabel = modelName(data.model) || data.model;
+    }
+    if (data.warn) addMsg("sys", data.warn);
+    if (state.settingsPage === "provider") {
+      if (data.providers) paintProviders(data.providers);
+      paintApi(data);
+      paintKeyRow(data, data.key);
+      paintPplxRow(data);
+    }
+    paintHome();
+    await loadModels();
+    await refreshStatus();
+    return data;
+  }
+
   async function setProvider(id, url) {
     const body = { provider: url || id };
+    const pending = pendingKey();
+    if (pending) body.key = pending;
     const r = await fetch("/api/provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1984,20 +2077,23 @@
     });
     const data = await r.json();
     if (data.error) throw new Error(data.error);
+    if (pending && $("key-input")) $("key-input").value = "";
     state.provider = data.id || id;
     state.providerLabel = data.label || id;
     if (data.model) {
       state.model = data.model;
       state.modelLabel = modelName(data.model) || data.model;
     }
+    if (data.warn) addMsg("sys", data.warn);
     if (state.settingsPage === "provider") {
       paintProviders(data.providers || []);
     }
     paintApi(data);
-    const keyRow = $("key-row");
+    paintKeyRow(data, data.key);
+    paintPplxRow(data);
     const inp = $("key-input");
-    if (keyRow) keyRow.hidden = !data.needs_key;
     if (data.needs_key && inp) {
+      const keyRow = $("key-row");
       keyRow && keyRow.scrollIntoView({ block: "nearest" });
       inp.focus();
     }
@@ -2035,6 +2131,8 @@
     } else if (state.provider) {
       body.provider = state.provider;
     }
+    const pending = pendingKey();
+    if (pending) body.key = pending;
     const r = await fetch("/api/provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2042,7 +2140,14 @@
     });
     const data = await r.json();
     if (data.error) throw new Error(data.error);
+    if (pending && $("key-input")) $("key-input").value = "";
+    if (data.id) {
+      state.provider = data.id;
+      if (data.label) state.providerLabel = data.label;
+    }
+    if (data.warn) addMsg("sys", data.warn);
     paintApi(data);
+    paintKeyRow(data, data.key);
     await refreshStatus();
     return data;
   }
@@ -2677,19 +2782,41 @@
     keyInput.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault();
-      const key = keyInput.value.trim();
-      if (!key) return;
       try {
-        const r = await fetch("/api/key", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key }),
-        });
-        const data = await r.json();
-        if (data.error) throw new Error(data.error);
-        keyInput.value = "";
-        await loadModels();
-        await refreshStatus();
+        await saveKey(keyInput.value);
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const keySave = $("key-save");
+  if (keySave) {
+    keySave.addEventListener("click", async () => {
+      try {
+        await saveKey(pendingKey());
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const pplxInput = $("pplx-input");
+  if (pplxInput) {
+    pplxInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      try {
+        await savePplxKey(pplxInput.value);
+      } catch (err) {
+        addMsg("sys", String(err.message || err));
+      }
+    });
+  }
+  const pplxSave = $("pplx-save");
+  if (pplxSave) {
+    pplxSave.addEventListener("click", async () => {
+      const v = pplxInput ? pplxInput.value : "";
+      try {
+        await savePplxKey(v);
       } catch (err) {
         addMsg("sys", String(err.message || err));
       }

@@ -61,6 +61,19 @@ class RankModels(unittest.TestCase):
         self.assertEqual(ids[0], "grok-4")
         self.assertNotIn("zai/glm-5.2", ids)
 
+    def test_openrouter_free_first(self):
+        found = [
+            {"id": "openai/gpt-4o", "label": "gpt-4o"},
+            {"id": "stealth/ox-alpha", "label": "ox-alpha"},
+            {"id": "z-ai/glm-5.2:free", "label": "glm-5.2:free"},
+        ]
+        ranked = server.rank_models(found, "stealth/ox-alpha", prefer_free=True)
+        ids = [m["id"] for m in ranked]
+        self.assertEqual(ids[0], "stealth/ox-alpha")
+        self.assertEqual(ids[1], "z-ai/glm-5.2:free")
+        self.assertEqual(ids[-1], "openai/gpt-4o")
+        self.assertIn("(free)", ranked[0]["label"])
+
 
 class RecoverError(unittest.TestCase):
     def test_provider_unavailable(self):
@@ -199,6 +212,30 @@ class Steps(unittest.TestCase):
         self.assertEqual(s["kind"], "list")
         self.assertEqual(s["status"], "running")
         self.assertEqual(s["path"], "web")
+
+    def test_progress_fetching(self):
+        s = server.parse_step("Fetching https://example.com/")
+        self.assertEqual(s["kind"], "web")
+        self.assertEqual(s["detail"], "https://example.com/")
+        self.assertEqual(s["status"], "ok")
+
+    def test_progress_searching_pathless(self):
+        s = server.parse_step("● Searching")
+        self.assertEqual(s["kind"], "search")
+        self.assertEqual(s["status"], "running")
+
+    def test_tool_web_fetch_nested(self):
+        s = server.tool_step({
+            "name": "web_fetch",
+            "status": "success",
+            "web_fetch": {"url": "https://example.com/", "status": 200},
+        })
+        self.assertEqual(s["kind"], "web")
+        self.assertIn("example.com", s["detail"])
+
+    def test_malformed_identity(self):
+        msg = server.recover_error("", "fx: MalformedProviderResultIdentity")
+        self.assertIn("tool", msg.lower())
 
     def test_progress_pathless_dropped_into_kind(self):
         s = server.parse_step("● Reading")
