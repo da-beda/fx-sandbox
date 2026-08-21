@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax
+        run: bash -n fxs install.sh setup-fx.sh tests/*.sh
+      - name: Tests
+        run: bash tests/run.sh
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build reference image through canonical fx installer
+        run: docker build --tag fxs-ci .
+      - name: Verify fx in reference image
+        run: docker run --rm fxs-ci fx --version
