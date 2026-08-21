@@ -2003,6 +2003,10 @@
       hint.textContent = "Perplexity key is saved. Search uses it even on OpenRouter. Paste a new one to replace.";
     } else if (p && p.vercel) {
       hint.textContent = "On Vercel, web search already uses AI Gateway. Optional pplx- key is used if you switch providers.";
+    } else if (p && p.id === "openrouter") {
+      hint.textContent = p.gateway_search
+        ? "Vercel search needs a card on that account, so search uses OpenRouter instead. Optional pplx- for Perplexity."
+        : "Search uses OpenRouter. Paste pplx- or vck_ to prefer those.";
     } else if (p && p.gateway_search) {
       hint.textContent = "Search uses your Vercel key via AI Gateway (that account needs a card). Paste pplx- to search without Vercel billing.";
     } else {

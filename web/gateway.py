@@ -428,6 +428,7 @@ def current_provider() -> dict[str, Any]:
         "providers": PROVIDERS,
         "perplexity": bool((os.environ.get("PERPLEXITY_API_KEY") or "").strip()),
         "gateway_search": bool(vercel_gateway_key()),
+        "openrouter_search": bool(openrouter_api_key()),
     }
 
 
@@ -889,6 +890,15 @@ def vercel_gateway_key() -> str:
     return ""
 
 
+def openrouter_api_key() -> str:
+    load_env_file()
+    for k in ("OPENROUTER_API_KEY", "OPENAI_API_KEY"):
+        v = (os.environ.get(k) or "").strip()
+        if v.startswith("sk-or"):
+            return v
+    return ""
+
+
 def remember_vercel_key(key: str = "") -> str:
     """Keep a vck_ so web search can use AI Gateway after switching LLM providers."""
     key = (key or "").strip()
@@ -934,8 +944,8 @@ def _normalize_search_hits(query: str, rows: Any, limit: int) -> dict[str, Any]:
 
 
 SEARCH_NO_KEY = (
-    "Web search needs a Perplexity API key (pplx-…) or a Vercel AI Gateway key (vck_…). "
-    "Add one in Settings → Provider → Web search."
+    "Web search needs a Perplexity API key (pplx-…), a billed Vercel AI Gateway key (vck_…), "
+    "or an OpenRouter key. Add one in Settings → Provider."
 )
 GATEWAY_SEARCH_URL = "https://ai-gateway.vercel.sh/v3/ai/language-model"
 GATEWAY_PROTOCOL_VERSION = "0.0.1"
@@ -980,8 +990,12 @@ def _gateway_http_error(exc: urllib.error.HTTPError) -> str:
     return f"Vercel AI Gateway search failed (HTTP {exc.code}). {msg}"
 
 
+def _search_has_hits(out: Any) -> bool:
+    return isinstance(out, dict) and isinstance(out.get("results"), list) and bool(out["results"])
+
+
 def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
-    """Direct Perplexity Search if a pplx- key is set, else Vercel AI Gateway. Never raises."""
+    """pplx- first, then Vercel Gateway, then OpenRouter web search. Never raises."""
     if not isinstance(inp, dict):
         inp = {}
     query = _search_query_from_input(inp, fallback_query)
@@ -992,11 +1006,20 @@ def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
         max_results = max(1, min(int(raw_n), 20))
     except (TypeError, ValueError):
         max_results = 5
+    last: dict[str, Any] = {"error": SEARCH_NO_KEY}
     if perplexity_api_key():
-        return run_direct_perplexity_search(query, max_results)
+        last = run_direct_perplexity_search(query, max_results)
+        if _search_has_hits(last):
+            return last
     if vercel_gateway_key():
-        return run_gateway_search(query, max_results)
-    return {"error": SEARCH_NO_KEY}
+        last = run_gateway_search(query, max_results)
+        if _search_has_hits(last):
+            return last
+    if openrouter_api_key():
+        last = run_openrouter_search(query, max_results)
+        if _search_has_hits(last):
+            return last
+    return last
 
 
 def run_direct_perplexity_search(query: str, max_results: int = 5) -> dict[str, Any]:
@@ -1142,6 +1165,103 @@ def run_gateway_search(query: str, max_results: int = 5) -> dict[str, Any]:
     out = _normalize_search_hits(query, rows, max_results)
     out["source"] = "vercel-gateway"
     return out
+
+
+def _openrouter_search_model() -> str:
+    up = configured_upstream()
+    if provider_id_for(up) == "openrouter":
+        m = (os.environ.get("FX_MODEL") or "").strip()
+        if m:
+            return m
+    return "stealth/ox-alpha"
+
+
+def _hits_from_openrouter(data: Any, query: str, limit: int) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {"error": "OpenRouter search returned no results"}
+    if data.get("error"):
+        err = data["error"]
+        if isinstance(err, dict):
+            err = err.get("message") or err
+        return {"error": f"OpenRouter search failed. {err}"}
+    choice = (data.get("choices") or [{}])[0] or {}
+    msg = choice.get("message") or {}
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ann in msg.get("annotations") or []:
+        if not isinstance(ann, dict):
+            continue
+        cit = ann.get("url_citation") if isinstance(ann.get("url_citation"), dict) else None
+        if not cit:
+            continue
+        url = str(cit.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        rows.append({
+            "title": cit.get("title") or "",
+            "url": url,
+            "snippet": str(cit.get("content") or cit.get("snippet") or "")[:800],
+            "date": cit.get("date") or "",
+        })
+        if len(rows) >= limit:
+            break
+    if rows:
+        return {"query": query, "results": rows, "source": "openrouter"}
+    raw = msg.get("content")
+    if isinstance(raw, str) and raw.strip().startswith("["):
+        try:
+            parsed = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            out = _normalize_search_hits(query, parsed, limit)
+            if _search_has_hits(out):
+                out["source"] = "openrouter"
+                return out
+    return {"error": "OpenRouter search returned no results"}
+
+
+def run_openrouter_search(query: str, max_results: int = 5) -> dict[str, Any]:
+    """OpenRouter server-side web search using the saved sk-or key. Never raises."""
+    key = openrouter_api_key()
+    if not key:
+        return {"error": SEARCH_NO_KEY}
+    body = json.dumps({
+        "model": _openrouter_search_model(),
+        "stream": False,
+        "max_tokens": 256,
+        "messages": [{
+            "role": "user",
+            "content": "Search the web for " + json.dumps(query) + ". Use the web search tool.",
+        }],
+        "tools": [{
+            "type": "openrouter:web_search",
+            "parameters": {"max_results": max_results},
+        }],
+        "tool_choice": "required",
+    }, separators=(",", ":")).encode()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "HTTP-Referer": "https://fxs.local",
+            "X-Title": "fxs",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", "replace")[:300]
+        return {"error": f"OpenRouter search failed (HTTP {e.code}). {err}"}
+    except Exception as e:
+        return {"error": f"OpenRouter search failed. {e}"}
+    return _hits_from_openrouter(data, query, max_results)
 
 
 class Stream:

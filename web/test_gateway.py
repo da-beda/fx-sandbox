@@ -592,11 +592,16 @@ class HTTP(unittest.TestCase):
             gw.server_close(); up.server_close()
 
     def test_language_model_executes_search_and_continues(self):
-        prev = os.environ.pop("PERPLEXITY_API_KEY", None)
-        prev_vck = os.environ.pop("VERCEL_AI_GATEWAY_API_KEY", None)
+        prev_keys = {}
+        for k in (
+            "PERPLEXITY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY",
+            "OPENROUTER_API_KEY", "OPENAI_API_KEY",
+        ):
+            prev_keys[k] = os.environ.get(k)
+            os.environ[k] = ""
         prev_gw = os.environ.get("AI_GATEWAY_API_KEY")
         if (prev_gw or "").startswith("vck_"):
-            os.environ.pop("AI_GATEWAY_API_KEY", None)
+            os.environ["AI_GATEWAY_API_KEY"] = ""
         else:
             prev_gw = None
         posts: list[dict] = []
@@ -679,14 +684,11 @@ class HTTP(unittest.TestCase):
         finally:
             gw.shutdown(); up.shutdown()
             gw.server_close(); up.server_close()
-            if prev is None:
-                os.environ.pop("PERPLEXITY_API_KEY", None)
-            else:
-                os.environ["PERPLEXITY_API_KEY"] = prev
-            if prev_vck is None:
-                os.environ.pop("VERCEL_AI_GATEWAY_API_KEY", None)
-            else:
-                os.environ["VERCEL_AI_GATEWAY_API_KEY"] = prev_vck
+            for k, v in prev_keys.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
             if prev_gw is not None:
                 os.environ["AI_GATEWAY_API_KEY"] = prev_gw
 
@@ -971,6 +973,68 @@ class IsolatedApply(unittest.TestCase):
         self.assertIn("credit card", out.get("error", "").lower())
         self.assertIn("pplx-", out.get("error", ""))
         self.assertNotIn("results", out)
+
+    def test_gateway_403_falls_back_to_openrouter(self):
+        import urllib.request
+        os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_search"
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-fallback"
+        orig = urllib.request.urlopen
+        def fake_open(req, timeout=None):
+            url = getattr(req, "full_url", "") or ""
+            if "ai-gateway.vercel.sh" in url:
+                raise HTTPError(
+                    url, 403, "Forbidden", hdrs=None,
+                    fp=io.BytesIO(b'{"error":{"message":"AI Gateway requires a valid credit card on file"}}'),
+                )
+            self.assertIn("openrouter.ai", url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *a):
+                    return False
+                def read(self):
+                    return json.dumps({
+                        "choices": [{
+                            "message": {
+                                "annotations": [{
+                                    "type": "url_citation",
+                                    "url_citation": {
+                                        "title": "Horst Schlämmer",
+                                        "url": "https://de.wikipedia.org/wiki/Horst_Schlämmer",
+                                        "content": "Comedy figure by Hape Kerkeling.",
+                                    },
+                                }]
+                            }
+                        }]
+                    }).encode()
+            return FakeResp()
+        urllib.request.urlopen = fake_open
+        try:
+            out = gateway.run_perplexity_search({"query": "Horst Schlemmer"})
+        finally:
+            urllib.request.urlopen = orig
+        self.assertEqual(out.get("source"), "openrouter")
+        self.assertEqual(out["results"][0]["url"], "https://de.wikipedia.org/wiki/Horst_Schlämmer")
+
+    def test_openrouter_annotations_parsed(self):
+        data = {
+            "choices": [{
+                "message": {
+                    "content": "ignored",
+                    "annotations": [
+                        {"type": "url_citation", "url_citation": {
+                            "title": "A", "url": "https://a.example", "content": "aa"}},
+                        {"type": "url_citation", "url_citation": {
+                            "title": "A dup", "url": "https://a.example", "content": "skip"}},
+                        {"type": "url_citation", "url_citation": {
+                            "title": "B", "url": "https://b.example", "content": "bb"}},
+                    ],
+                }
+            }]
+        }
+        out = gateway._hits_from_openrouter(data, "q", 5)
+        self.assertEqual(out["source"], "openrouter")
+        self.assertEqual([r["url"] for r in out["results"]], ["https://a.example", "https://b.example"])
 
     def test_gateway_event_accepts_provider_tool_name(self):
         parsed = gateway._tool_result_from_gateway_event({
