@@ -1,0 +1,93 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign multi-arch image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Package tiny CLI release
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          root="dist/fxs-${tag}"
+          mkdir -p "${root}/docs"
+          install -m 0755 fxs install.sh setup-fx.sh "${root}/"
+          install -m 0644 Dockerfile README.md LICENSE "${root}/"
+          install -m 0644 docs/DESIGN.md docs/THREAT_MODEL.md "${root}/docs/"
+          tar -czf "dist/fxs-${tag}.tar.gz" -C dist "fxs-${tag}"
+          rm -rf "${root}"
+          printf '%s@%s\n' "${IMAGE}" "${DIGEST}" > dist/IMAGE_DIGEST
+          (cd dist && sha256sum "fxs-${tag}.tar.gz" IMAGE_DIGEST > SHA256SUMS)
+
+      - name: Sign release artifacts
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          cosign sign-blob --yes \
+            --bundle "dist/fxs-${tag}.tar.gz.sigstore.json" \
+            "dist/fxs-${tag}.tar.gz"
+          cosign sign-blob --yes \
+            --bundle dist/SHA256SUMS.sigstore.json \
+            dist/SHA256SUMS
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* \
+              --verify-tag \
+              --title "$tag" \
+              --generate-notes
+          fi

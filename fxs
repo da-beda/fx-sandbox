@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# fxs — fx in a box.
+# Same fx. Same agent loop. One host project. Less host authority.
+#
+# fxs owns the external containment boundary only: one workspace bind mount
+# plus isolated per-project state. The agent loop and fx process semantics stay
+# upstream-owned except for the few boundary controls documented below.
+set -euo pipefail
+IFS=$'\n\t'
+
+IMAGE="${FXS_IMAGE:-fxs:latest}"
+WORKSPACE="${FXS_WORKSPACE:-$PWD}"
+STATE_ROOT="${FXS_STATE_ROOT:-${HOME}/.local/share/fxs/state}"
+DATA_DIR="${FXS_DATA_DIR:-${HOME}/.local/share/fxs}"
+DOCKERFILE="${FXS_DOCKERFILE:-${DATA_DIR}/Dockerfile}"
+NETWORK="${FXS_NETWORK:-bridge}"
+PERMISSION="${FX_PERMISSION_MODE:-yolo}"
+READ_ONLY_WS=0
+HOST_GATEWAY="${FXS_HOST_GATEWAY:-0}"
+EPHEMERAL=0
+DRY_RUN=0
+VERBOSE="${FXS_VERBOSE:-0}"
+BUILD_IMAGE=0
+FX_VERSION="${FXS_FX_VERSION:-}"
+MEMORY="${FXS_MEMORY:-}"
+CPUS="${FXS_CPUS:-}"
+PIDS="${FXS_PIDS:-}"
+
+usage() {
+  cat <<'EOF_USAGE'
+fxs — fx in a box
+Same fx. Same agent loop. One host project. Less host authority.
+
+USAGE
+  fxs [fxs-options] [--] [fx-args...]
+
+FXS OPTIONS
+  -w, --workspace DIR       workspace to expose (default: $PWD)
+  --read-only-workspace     mount the workspace read-only
+  --ask                     fx permission mode ask (default: yolo)
+  --auto                    fx permission mode auto
+  --yolo                    fx permission mode yolo
+  --perm MODE               ask | auto | yolo
+  --model ID                process-only FX_MODEL override
+  --steps N                 process-only agent step limit (0 = unlimited)
+  --deep, --autonomous      compatibility alias for --steps 0
+  --offline                 no container network
+  --network NET             Docker network (default: bridge)
+  --host-gateway            expose host.docker.internal explicitly
+  --memory SIZE             optional Docker memory limit
+  --cpus N                  optional Docker CPU limit
+  --pids N                  optional Docker PID limit
+  --ephemeral               do not persist the isolated fx home
+  --image IMAGE             image containing fx (default: fxs:latest)
+  --build-image             explicitly build the reference image, then exit
+  --fx-version VERSION      pin fx when used with --build-image
+  --dry-run                 print the docker command, do not execute it
+  --verbose                 print sandbox metadata before launch
+  -h, --help                show this help
+
+Everything after the first unrecognized argument is passed to fx unchanged.
+Use `fxs -- --help` when you specifically want fx's own `--help` output.
+
+ENVIRONMENT
+  FXS_IMAGE, FXS_WORKSPACE, FXS_STATE_ROOT, FXS_NETWORK
+  FXS_MEMORY, FXS_CPUS, FXS_PIDS, FXS_HOST_GATEWAY, FXS_VERBOSE
+  AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN
+  Exported upstream FX_* process controls are forwarded automatically.
+
+CONTRACT
+  fx  = native fx
+  fxs = upstream fx + an external container boundary
+
+fxs never falls back to native execution. The container image is the fx update
+unit, so in-container automatic self-upgrade is disabled (FX_AUTO_UPGRADE=0).
+EOF_USAGE
+}
+
+die()  { printf 'fxs: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'fxs: warning: %s\n' "$*" >&2; }
+log()  { [[ "$VERBOSE" == "1" ]] && printf 'fxs: %s\n' "$*" >&2 || true; }
+
+abs_dir() {
+  local p="$1"
+  case "$p" in
+    '~') p="$HOME" ;;
+    '~/'*) p="${HOME}/${p#~/}" ;;
+  esac
+  [[ -d "$p" ]] || die "workspace is not a directory: $p"
+  (cd "$p" && pwd -P)
+}
+
+hash_path() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | awk '{print substr($1,1,16)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 | awk '{print substr($1,1,16)}'
+  else
+    die "need sha256sum or shasum"
+  fi
+}
+
+is_dangerous_workspace() {
+  local ws="$1"
+  local home_physical="$HOME"
+  # macOS commonly aliases /var -> /private/var. WORKSPACE is canonicalized
+  # with pwd -P, so canonicalize HOME too before applying exact/sensitive-path
+  # guards. Otherwise an aliased HOME could bypass the equality check.
+  if [[ -d "$HOME" ]]; then
+    home_physical="$(cd "$HOME" && pwd -P)"
+  fi
+
+  case "$ws" in
+    /|/bin|/boot|/dev|/etc|/lib|/lib64|/proc|/root|/run|/sbin|/sys|/usr|/var|\
+    /Users|/System|/Library|/Applications|/private|/Volumes|/opt/homebrew)
+      return 0 ;;
+  esac
+  [[ "$ws" == "$home_physical" || "$ws" == "$home_physical/" ]] && return 0
+  case "$ws" in
+    "$home_physical/.ssh"|"$home_physical/.gnupg"|"$home_physical/.aws"|\
+    "$home_physical/.azure"|"$home_physical/.kube"|"$home_physical/.docker"|\
+    "$home_physical/.config"|"$home_physical/Library")
+      return 0 ;;
+  esac
+  [[ -S "$ws/docker.sock" || -S "$ws/var/run/docker.sock" ]] && return 0
+  return 1
+}
+
+valid_permission() {
+  case "$1" in ask|auto|yolo) return 0 ;; *) return 1 ;; esac
+}
+
+FX_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -w|--workspace)
+      [[ $# -ge 2 ]] || die "--workspace needs a directory"
+      WORKSPACE="$2"; shift 2 ;;
+    --read-only-workspace|--readonly) READ_ONLY_WS=1; shift ;;
+    --ask|--no-yolo) PERMISSION=ask; shift ;;
+    --auto) PERMISSION=auto; shift ;;
+    --yolo|--allow-yolo) PERMISSION=yolo; shift ;;
+    --perm)
+      [[ $# -ge 2 ]] || die "--perm needs ask, auto, or yolo"
+      valid_permission "$2" || die "--perm needs ask, auto, or yolo"
+      PERMISSION="$2"; shift 2 ;;
+    --model)
+      [[ $# -ge 2 && -n "$2" ]] || die "--model needs a model ID"
+      FX_MODEL="$2"; shift 2 ;;
+    --steps)
+      [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--steps needs a non-negative integer"
+      FX_MAX_AGENT_STEPS="$2"; shift 2 ;;
+    --deep|--autonomous) FX_MAX_AGENT_STEPS=0; shift ;;
+    --offline) NETWORK=none; shift ;;
+    --network)
+      [[ $# -ge 2 && -n "$2" ]] || die "--network needs a Docker network"
+      NETWORK="$2"; shift 2 ;;
+    --host-gateway) HOST_GATEWAY=1; shift ;;
+    --memory)
+      [[ $# -ge 2 && -n "$2" ]] || die "--memory needs a Docker size"
+      MEMORY="$2"; shift 2 ;;
+    --cpus)
+      [[ $# -ge 2 && -n "$2" ]] || die "--cpus needs a value"
+      CPUS="$2"; shift 2 ;;
+    --pids)
+      [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--pids needs a non-negative integer"
+      PIDS="$2"; shift 2 ;;
+    --ephemeral|--no-persist) EPHEMERAL=1; shift ;;
+    --image)
+      [[ $# -ge 2 && -n "$2" ]] || die "--image needs a name"
+      IMAGE="$2"; shift 2 ;;
+    --build-image) BUILD_IMAGE=1; shift ;;
+    --fx-version)
+      [[ $# -ge 2 && -n "$2" ]] || die "--fx-version needs a version"
+      FX_VERSION="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --verbose) VERBOSE=1; shift ;;
+    --) shift; FX_ARGS=("$@"); break ;;
+    *) FX_ARGS=("$@"); break ;;
+  esac
+done
+
+valid_permission "$PERMISSION" || die "invalid FX_PERMISSION_MODE: $PERMISSION"
+
+if [[ "$BUILD_IMAGE" == "1" ]]; then
+  command -v docker >/dev/null 2>&1 || die "Docker is not available. Install Docker, then retry."
+  docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start Docker, then retry."
+  [[ -f "$DOCKERFILE" ]] || {
+    if [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/Dockerfile" ]]; then
+      DOCKERFILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/Dockerfile"
+    else
+      die "reference Dockerfile not found: $DOCKERFILE"
+    fi
+  }
+  build=(docker build --tag "$IMAGE" --file "$DOCKERFILE")
+  [[ -n "$FX_VERSION" ]] && build+=(--build-arg "FX_VERSION=$FX_VERSION")
+  build+=("$(dirname "$DOCKERFILE")")
+  log "building $IMAGE"
+  exec "${build[@]}"
+fi
+
+WORKSPACE="$(abs_dir "$WORKSPACE")"
+is_dangerous_workspace "$WORKSPACE" && die "refusing workspace $WORKSPACE; choose one project directory"
+[[ "$WORKSPACE" != *","* ]] || die "workspace path contains a comma, unsupported by Docker --mount"
+[[ "$STATE_ROOT" != *","* ]] || die "FXS_STATE_ROOT contains a comma, unsupported by Docker --mount"
+uid="$(id -u)"
+gid="$(id -g)"
+
+# Fail closed before creating persistent state. A missing/stopped Docker daemon
+# must not turn `fxs` into native fx or cause unrelated setup I/O.
+if [[ "$DRY_RUN" != "1" ]]; then
+  [[ "$uid" -ne 0 ]] || die "refusing to run as root"
+  command -v docker >/dev/null 2>&1 || die "Docker is not available. Install Docker and retry."
+  docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start Docker and retry."
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image '$IMAGE' is missing. Run: fxs --build-image"
+fi
+
+mount_spec="type=bind,src=${WORKSPACE},dst=/workspace"
+[[ "$READ_ONLY_WS" == "1" ]] && mount_spec+=",readonly"
+
+DOCKER_ARGS=(
+  run --rm
+  --read-only
+  --init
+  --tmpfs /tmp:rw,nosuid,nodev
+  --mount "$mount_spec"
+  --workdir /workspace
+  --user "${uid}:${gid}"
+  --group-add "$gid"
+  --security-opt no-new-privileges:true
+  --cap-drop ALL
+  --network "$NETWORK"
+  -e "HOME=/home/fx"
+  -e "FX_PERMISSION_MODE=$PERMISSION"
+  -e "FX_AUTO_UPGRADE=0"
+  -e "FX_NO_OPEN_BROWSER=1"
+  -e "TERM=${TERM:-xterm-256color}"
+)
+
+if [[ "$EPHEMERAL" == "1" ]]; then
+  DOCKER_ARGS+=(--tmpfs "/home/fx:rw,nosuid,nodev,uid=${uid},gid=${gid},mode=700")
+  state_label="ephemeral"
+else
+  state_key="$(hash_path "$WORKSPACE")"
+  state_dir="${STATE_ROOT}/${state_key}"
+  state_home="${state_dir}/home"
+  if [[ "$DRY_RUN" != "1" ]]; then
+    mkdir -p "$state_home"
+    chmod 0700 "$state_dir" "$state_home" 2>/dev/null || true
+    printf '%s\n' "$WORKSPACE" > "${state_dir}/origin"
+  fi
+  DOCKER_ARGS+=(--mount "type=bind,src=${state_home},dst=/home/fx")
+  state_label="$state_dir"
+fi
+
+[[ "$HOST_GATEWAY" == "1" ]] && DOCKER_ARGS+=(--add-host "host.docker.internal:host-gateway")
+[[ -n "$MEMORY" ]] && DOCKER_ARGS+=(--memory "$MEMORY")
+[[ -n "$CPUS" ]] && DOCKER_ARGS+=(--cpus "$CPUS")
+[[ -n "$PIDS" ]] && DOCKER_ARGS+=(--pids-limit "$PIDS")
+
+# Credentials do not use the FX_ prefix, so pass the two upstream-native
+# process credentials explicitly. Values stay out of the docker argv.
+for name in AI_GATEWAY_API_KEY VERCEL_OIDC_TOKEN; do
+  if [[ -n "${!name-}" ]]; then
+    DOCKER_ARGS+=(-e "$name")
+  fi
+done
+
+# Forward exported upstream FX_* controls generically so fxs follows future fx
+# additions without maintaining a semantic allowlist. The exceptions are values
+# fxs deliberately owns as part of the boundary, plus model/steps which may be
+# set by non-exported wrapper convenience flags below.
+while IFS='=' read -r name _; do
+  case "$name" in
+    FX_*)
+      case "$name" in
+        FX_PERMISSION_MODE|FX_AUTO_UPGRADE|FX_NO_OPEN_BROWSER|FX_MODEL|FX_MAX_AGENT_STEPS) ;;
+        *) DOCKER_ARGS+=(-e "$name") ;;
+      esac
+      ;;
+  esac
+done < <(env)
+
+[[ -n "${FX_MODEL-}" ]] && DOCKER_ARGS+=(-e "FX_MODEL=${FX_MODEL}")
+[[ -n "${FX_MAX_AGENT_STEPS-}" ]] && DOCKER_ARGS+=(-e "FX_MAX_AGENT_STEPS=${FX_MAX_AGENT_STEPS}")
+
+if [[ -t 0 && -t 1 ]]; then
+  DOCKER_ARGS+=(-it)
+else
+  DOCKER_ARGS+=(-i)
+fi
+
+CMD=(docker "${DOCKER_ARGS[@]}" "$IMAGE" fx)
+[[ ${#FX_ARGS[@]} -gt 0 ]] && CMD+=("${FX_ARGS[@]}")
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  printf '%q' "${CMD[0]}"
+  printf ' %q' "${CMD[@]:1}"
+  printf '\n'
+  exit 0
+fi
+
+log "workspace=$WORKSPACE"
+log "state=$state_label"
+log "image=$IMAGE network=$NETWORK permission=$PERMISSION"
+exec "${CMD[@]}"
