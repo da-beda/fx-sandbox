@@ -938,7 +938,10 @@ class IsolatedApply(unittest.TestCase):
         def fake_open(req, timeout=None):
             self.assertIn("ai-gateway.vercel.sh", req.full_url)
             self.assertIn("/v3/ai/language-model", req.full_url)
-            self.assertTrue((req.get_header("Authorization") or "").endswith("vck_search"))
+            items = {k.lower(): v for k, v in req.header_items()}
+            self.assertTrue((items.get("authorization") or "").endswith("vck_search"))
+            self.assertEqual(items.get("ai-gateway-protocol-version"), "0.0.1")
+            self.assertEqual(items.get("ai-language-model-specification-version"), "3")
             return FakeSSE()
         urllib.request.urlopen = fake_open
         try:
@@ -950,6 +953,24 @@ class IsolatedApply(unittest.TestCase):
         body = json.loads(gateway._gateway_search_body("hello world", 5))
         self.assertEqual(body["tools"][0]["id"], "gateway.perplexity_search")
         self.assertEqual(body["toolChoice"]["toolName"], "perplexity_search")
+
+    def test_gateway_search_maps_credit_card_403(self):
+        import urllib.request
+        os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_search"
+        orig = urllib.request.urlopen
+        def fake_open(req, timeout=None):
+            raise HTTPError(
+                req.full_url, 403, "Forbidden", hdrs=None,
+                fp=io.BytesIO(b'{"error":{"message":"AI Gateway requires a valid credit card on file to service requests."}}'),
+            )
+        urllib.request.urlopen = fake_open
+        try:
+            out = gateway.run_perplexity_search({"query": "hello world"})
+        finally:
+            urllib.request.urlopen = orig
+        self.assertIn("credit card", out.get("error", "").lower())
+        self.assertIn("pplx-", out.get("error", ""))
+        self.assertNotIn("results", out)
 
     def test_gateway_event_accepts_provider_tool_name(self):
         parsed = gateway._tool_result_from_gateway_event({

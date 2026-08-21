@@ -2004,7 +2004,7 @@
     } else if (p && p.vercel) {
       hint.textContent = "On Vercel, web search already uses AI Gateway. Optional pplx- key is used if you switch providers.";
     } else if (p && p.gateway_search) {
-      hint.textContent = "Search falls back to your Vercel AI Gateway key. Paste pplx- to use Perplexity directly.";
+      hint.textContent = "Search uses your Vercel key via AI Gateway (that account needs a card). Paste pplx- to search without Vercel billing.";
     } else {
       hint.textContent = "pplx- or vck_ key. Used when the chat provider is not Vercel. Kept on this machine.";
     }

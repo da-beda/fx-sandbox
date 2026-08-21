@@ -938,6 +938,46 @@ SEARCH_NO_KEY = (
     "Add one in Settings → Provider → Web search."
 )
 GATEWAY_SEARCH_URL = "https://ai-gateway.vercel.sh/v3/ai/language-model"
+GATEWAY_PROTOCOL_VERSION = "0.0.1"
+GATEWAY_SPEC_VERSION = "3"
+GATEWAY_CARD_HINT = (
+    "Vercel AI Gateway needs a credit card on the Vercel account to run search. "
+    "Add a card at vercel.com, or paste a Perplexity API key (pplx-…) in "
+    "Settings → Provider → Web search. Do not fetch search-engine HTML pages."
+)
+
+
+def _gateway_search_headers(key: str) -> dict[str, str]:
+    return {
+        "Authorization": "Bearer " + key,
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "ai-language-model-id": VERCEL_DEFAULT_MODEL,
+        "ai-language-model-streaming": "true",
+        "ai-language-model-specification-version": GATEWAY_SPEC_VERSION,
+        "ai-gateway-protocol-version": GATEWAY_PROTOCOL_VERSION,
+    }
+
+
+def _gateway_http_error(exc: urllib.error.HTTPError) -> str:
+    raw = exc.read().decode("utf-8", "replace")[:500]
+    msg = raw
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict):
+                msg = str(err.get("message") or err.get("code") or raw)
+            elif isinstance(err, str):
+                msg = err
+    except json.JSONDecodeError:
+        pass
+    low = (msg + " " + raw).lower()
+    if exc.code in (401, 403) and (
+        "credit card" in low or "customer_verification" in low
+    ):
+        return GATEWAY_CARD_HINT
+    return f"Vercel AI Gateway search failed (HTTP {exc.code}). {msg}"
 
 
 def run_perplexity_search(inp: Any, fallback_query: str = "") -> dict[str, Any]:
@@ -1063,19 +1103,12 @@ def run_gateway_search(query: str, max_results: int = 5) -> dict[str, Any]:
         GATEWAY_SEARCH_URL,
         data=_gateway_search_body(query, max_results),
         method="POST",
-        headers={
-            "Authorization": "Bearer " + key,
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "ai-language-model-id": VERCEL_DEFAULT_MODEL,
-            "ai-language-model-streaming": "true",
-        },
+        headers=_gateway_search_headers(key),
     )
     try:
         resp = urllib.request.urlopen(req, timeout=45)
     except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", "replace")[:300]
-        return {"error": f"Vercel AI Gateway search failed (HTTP {e.code}). {err}"}
+        return {"error": _gateway_http_error(e)}
     except Exception as e:
         return {"error": f"Vercel AI Gateway search failed. {e}"}
     found: Optional[dict[str, Any]] = None
