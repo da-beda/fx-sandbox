@@ -597,6 +597,7 @@ class HTTP(unittest.TestCase):
         prev_keys = {}
         for k in (
             "PERPLEXITY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY",
+            "FXS_VERCEL_SEARCH_MODEL",
             "OPENROUTER_API_KEY", "OPENAI_API_KEY",
         ):
             prev_keys[k] = os.environ.get(k)
@@ -719,6 +720,7 @@ class IsolatedApply(unittest.TestCase):
             "FX_GATEWAY_BASE_URL",
             "FX_GATEWAY_CHAT_URL", "FX_UPSTREAM_API",
             "PERPLEXITY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY",
+            "FXS_VERCEL_SEARCH_MODEL",
         ):
             self.prev_env[k] = os.environ.pop(k, None)
         os.environ["FXS_UI_LOCAL"] = "1"
@@ -930,6 +932,7 @@ class IsolatedApply(unittest.TestCase):
     def test_run_gateway_search_when_no_pplx(self):
         import urllib.request
         os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_search"
+        os.environ["FXS_VERCEL_SEARCH_MODEL"] = "provider/search-worker"
         payload = (
             b'data: {"type":"tool-result","toolName":"perplexity_search",'
             b'"output":{"results":[{"title":"Hi","url":"https://example.com","snippet":"x"}]}}\n\n'
@@ -955,6 +958,7 @@ class IsolatedApply(unittest.TestCase):
             self.assertTrue((items.get("authorization") or "").endswith("vck_search"))
             self.assertEqual(items.get("ai-gateway-protocol-version"), "0.0.1")
             self.assertEqual(items.get("ai-language-model-specification-version"), "3")
+            self.assertEqual(items.get("ai-language-model-id"), "provider/search-worker")
             return FakeSSE()
         urllib.request.urlopen = fake_open
         try:
@@ -970,6 +974,7 @@ class IsolatedApply(unittest.TestCase):
     def test_gateway_search_maps_credit_card_403(self):
         import urllib.request
         os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_search"
+        os.environ["FXS_VERCEL_SEARCH_MODEL"] = "provider/search-worker"
         orig = urllib.request.urlopen
         def fake_open(req, timeout=None):
             raise HTTPError(
@@ -988,6 +993,7 @@ class IsolatedApply(unittest.TestCase):
     def test_gateway_403_falls_back_to_openrouter(self):
         import urllib.request
         os.environ["VERCEL_AI_GATEWAY_API_KEY"] = "vck_search"
+        os.environ["FXS_VERCEL_SEARCH_MODEL"] = "provider/search-worker"
         os.environ["OPENROUTER_API_KEY"] = "sk-or-fallback"
         orig = urllib.request.urlopen
         def fake_open(req, timeout=None):

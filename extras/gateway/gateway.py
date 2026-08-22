@@ -32,6 +32,14 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 from urllib.parse import urlparse
 
+# `extras/ui/gateway.py` is a symlink to this file. Resolve the real source
+# directory so sibling compatibility modules remain importable through either
+# entry point without duplicating them into the WebUI tree.
+_GATEWAY_MODULE_DIR = str(Path(__file__).resolve().parent)
+if _GATEWAY_MODULE_DIR not in sys.path:
+    sys.path.insert(0, _GATEWAY_MODULE_DIR)
+import search_policy
+
 LISTEN_DEFAULT = os.environ.get("FXS_GATEWAY_LISTEN", "127.0.0.1:18787")
 USER_AGENT = "fxs-gateway/1"
 HOME = Path.home()
@@ -66,9 +74,6 @@ PROVIDER_ALIASES = {
     "together.ai": "together",
     "togetherai": "together",
 }
-# Kept only for the legacy Vercel-search compatibility path. Provider
-# selection must never treat this as the installed fx build's product default.
-LEGACY_VERCEL_SEARCH_MODEL = "zai/glm-5.2"
 DEFAULT_MODELS = {
     "openai": "gpt-4o",
     "xai": "grok-4",
@@ -955,12 +960,12 @@ GATEWAY_CARD_HINT = (
 )
 
 
-def _gateway_search_headers(key: str) -> dict[str, str]:
+def _gateway_search_headers(key: str, model: str) -> dict[str, str]:
     return {
         "Authorization": "Bearer " + key,
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
-        "ai-language-model-id": LEGACY_VERCEL_SEARCH_MODEL,
+        "ai-language-model-id": model,
         "ai-language-model-streaming": "true",
         "ai-language-model-specification-version": GATEWAY_SPEC_VERSION,
         "ai-gateway-protocol-version": GATEWAY_PROTOCOL_VERSION,
@@ -1120,11 +1125,23 @@ def run_gateway_search(query: str, max_results: int = 5) -> dict[str, Any]:
     key = vercel_gateway_key()
     if not key:
         return {"error": SEARCH_NO_KEY}
+    gateway_is_active = not bool(configured_upstream())
+    resolution = search_policy.resolve_vercel_search_model(
+        key,
+        current_provider_is_vercel=gateway_is_active,
+        current_model=(os.environ.get("FX_MODEL") or "") if gateway_is_active else "",
+    )
+    if not resolution.model:
+        low = (resolution.error or "").lower()
+        if "credit card" in low or "customer_verification" in low:
+            return {"error": GATEWAY_CARD_HINT}
+        detail = resolution.error or "could not resolve a tool-capable Gateway worker"
+        return {"error": "Vercel AI Gateway search unavailable. " + detail}
     req = urllib.request.Request(
         GATEWAY_SEARCH_URL,
         data=_gateway_search_body(query, max_results),
         method="POST",
-        headers=_gateway_search_headers(key),
+        headers=_gateway_search_headers(key, resolution.model),
     )
     try:
         resp = urllib.request.urlopen(req, timeout=45)
