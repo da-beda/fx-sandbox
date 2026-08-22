@@ -32,6 +32,8 @@ jobs:
         run: python3 --version
       - name: Gateway unit tests
         run: python3 extras/gateway/test_gateway.py
+      - name: Gateway search policy tests
+        run: python3 extras/gateway/test_search_policy.py
       - name: Native provider probe tests
         run: python3 extras/gateway/test_native_fx.py
       - name: WebUI backend tests
