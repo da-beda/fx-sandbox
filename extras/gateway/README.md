@@ -33,12 +33,27 @@ python3 extras/gateway/native_fx.py --json
 
 This gives the WebUI and future migration work a conservative rule: switch a provider path to native `fx` only after the installed binary itself proves the required wire works. Until then, keep using the adapter. Native Chat support alone is also not enough to retire the adapter's Responses path.
 
+## Vercel-backed search with another LLM provider
+
+The WebUI can retain a Vercel AI Gateway key for web search while the main model runs through OpenRouter, xAI, Ollama, or another OpenAI-compatible endpoint. That search path must not copy upstream `fx`'s current default model into this repository.
+
+`search_policy.py` therefore resolves the private Gateway search worker independently:
+
+1. `FXS_VERCEL_SEARCH_MODEL` is an explicit override for troubleshooting or pinning.
+2. When Vercel itself is the active provider and `FX_MODEL` is explicitly set, that active Gateway model is reused.
+3. Otherwise the authenticated `/coding-agent/v1/models` catalog is queried. A language model explicitly tagged for web search is preferred; otherwise the first server-ordered `tool-use` language model is used.
+4. Successful catalog resolution is cached for five minutes by API-key fingerprint. The raw key is never used as the cache key or persisted by this policy module.
+5. If no suitable worker can be resolved, Vercel search returns an explicit error and the existing search chain can still fall through to OpenRouter when configured.
+
+This keeps the search feature while removing the maintenance dependency on whichever model happens to be upstream `fx`'s product default that week.
+
 ## Compatibility contract
 
 The adapter is tested at two levels:
 
 ```bash
 python3 extras/gateway/test_gateway.py
+python3 extras/gateway/test_search_policy.py
 python3 extras/gateway/test_native_fx.py
 python3 extras/ui/test_server.py
 ```
