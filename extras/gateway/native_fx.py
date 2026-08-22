@@ -71,22 +71,29 @@ def probe_fx(path: Optional[str] = None) -> NativeFxCapabilities:
 
     evidence: list[str] = []
     setup_rc, setup_help = _run([fx, "setup", "--help"])
-    root_rc, root_help = _run([fx, "--help"])
+    _root_rc, root_help = _run([fx, "--help"])
     combined = "\n".join(part for part in (setup_help, root_help) if part)
 
     advertises_openai = setup_rc == 0 and _has_any(
         combined,
         ("openai-compatible", "openai compatible"),
     )
-    if advertises_openai:
-        evidence.append("setup advertises openai-compatible")
+    if not advertises_openai:
+        return NativeFxCapabilities(
+            available=True,
+            version=version,
+        )
+    evidence.append("setup advertises openai-compatible")
 
+    # Some older fx builds accept arbitrary setup subcommands with --help and
+    # return success. Only interrogate the detailed target after its parent help
+    # explicitly advertises it, otherwise that false-positive is meaningless.
     detail_rc, detail_help = _run([fx, "setup", "openai-compatible", "--help"])
     detail_ok = detail_rc == 0 and bool(detail_help.strip())
     if detail_ok:
         evidence.append("setup openai-compatible --help succeeds")
 
-    native = advertises_openai and detail_ok
+    native = detail_ok
     detail = "\n".join((combined, detail_help))
 
     # Chat Completions is the minimum contract for the native OpenAI-compatible
