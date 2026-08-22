@@ -3,6 +3,7 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,5 +30,11 @@ jobs:
           FXS_IMAGE: fxs-ci
           FXS_DOCKERFILE: ${{ github.workspace }}/Dockerfile
         run: ./fxs --build-image --verbose
-      - name: Verify fx in reference image
-        run: docker run --rm fxs-ci fx --version
+      - name: Exercise current stable fx through the real wrapper
+        env:
+          FXS_IMAGE: fxs-ci
+          FXS_STATE_ROOT: ${{ runner.temp }}/fxs-state
+        run: |
+          ./fxs -- --version
+          ./fxs -- --help > /tmp/fx-help.txt
+          test -s /tmp/fx-help.txt
