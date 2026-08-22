@@ -66,10 +66,10 @@ PROVIDER_ALIASES = {
     "together.ai": "together",
     "togetherai": "together",
 }
-VERCEL_DEFAULT_MODEL = "zai/glm-5.2"
-# Used when the current model is still the Vercel default (or empty).
+# Kept only for the legacy Vercel-search compatibility path. Provider
+# selection must never treat this as the installed fx build's product default.
+LEGACY_VERCEL_SEARCH_MODEL = "zai/glm-5.2"
 DEFAULT_MODELS = {
-    "vercel": VERCEL_DEFAULT_MODEL,
     "openai": "gpt-4o",
     "xai": "grok-4",
     "openrouter": "stealth/ox-alpha",
@@ -351,11 +351,13 @@ def upstream_http_error(code: int, body: bytes) -> str:
 
 
 def suggest_model(pid: str, current: str = "", catalog: Optional[list[str]] = None) -> str:
-    """Pick a model id this provider will actually serve.
+    """Pick a model the selected provider can serve without owning fx defaults.
 
-    Keep a non-default current id if the catalog (when given) lists it.
-    Never leave fx's Vercel default pointed at xAI / OpenAI / Ollama.
-    OpenRouter prefers free ids — paid ones 403 on an exhausted key.
+    A current model is only meaningful when the caller knows it belongs to the
+    provider being selected. When a live catalog exists it is authoritative;
+    otherwise provider presets are compatibility hints for non-Vercel backends.
+    Vercel with no explicit/current model returns empty so the installed fx
+    build chooses its own native default.
     """
     pid = pid or "vercel"
     current = (current or "").strip()
@@ -383,14 +385,10 @@ def suggest_model(pid: str, current: str = "", catalog: Optional[list[str]] = No
                 if i == prefix or i.endswith("/" + prefix) or i.endswith(":" + prefix):
                     return i
         return ids[0]
-    if pid in ("vercel",):
-        if current and current != VERCEL_DEFAULT_MODEL and "/" in current:
-            return current
-        return VERCEL_DEFAULT_MODEL
+    if pid == "vercel":
+        return current if current and "/" in current else ""
     hint = DEFAULT_MODELS.get(pid) or ""
-    if current and current != VERCEL_DEFAULT_MODEL:
-        return current
-    return hint or current or VERCEL_DEFAULT_MODEL
+    return current or hint
 
 
 def normalize_upstream_url(url: str) -> str:
@@ -962,7 +960,7 @@ def _gateway_search_headers(key: str) -> dict[str, str]:
         "Authorization": "Bearer " + key,
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
-        "ai-language-model-id": VERCEL_DEFAULT_MODEL,
+        "ai-language-model-id": LEGACY_VERCEL_SEARCH_MODEL,
         "ai-language-model-streaming": "true",
         "ai-language-model-specification-version": GATEWAY_SPEC_VERSION,
         "ai-gateway-protocol-version": GATEWAY_PROTOCOL_VERSION,
@@ -2077,7 +2075,7 @@ def print_env(listen: str = LISTEN_DEFAULT) -> str:
         escaped = model.replace("'", "'\\''")
         lines.append(f"export FX_MODEL='{escaped}'")
     else:
-        lines.append("# model: fx default is zai/glm-5.2. Override with FX_MODEL or `fxs models`.")
+        lines.append("# model: unset; the installed fx build chooses its native default.")
     return "\n".join(lines) + "\n"
 
 
@@ -2275,12 +2273,13 @@ def store_api_key(key: str) -> dict[str, Any]:
     if not key:
         raise ValueError("empty key")
     load_env_file()
+    was_upstream = bool(configured_upstream())
     hint = provider_from_key(key)
     if hint == "perplexity" or key.startswith("pplx-"):
         return store_perplexity_key(key)
     if hint == "vercel" or key.startswith("vck_"):
         remember_vercel_key(key)
-        upsert_env({
+        updates: dict[str, Optional[str]] = {
             "AI_GATEWAY_API_KEY": key,
             "VERCEL_AI_GATEWAY_API_KEY": key,
             "OPENAI_API_KEY": None,
@@ -2290,12 +2289,17 @@ def store_api_key(key: str) -> dict[str, Any]:
             "FX_UPSTREAM_API": None,
             "FX_GATEWAY_BASE_URL": None,
             "FX_GATEWAY_CHAT_URL": None,
-        })
+        }
+        if was_upstream:
+            updates["FX_MODEL"] = None
+        upsert_env(updates)
         os.environ["AI_GATEWAY_API_KEY"] = key
         os.environ["VERCEL_AI_GATEWAY_API_KEY"] = key
         for k in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "FX_UPSTREAM", "OPENAI_BASE_URL",
                   "FX_UPSTREAM_API", "FX_GATEWAY_BASE_URL", "FX_GATEWAY_CHAT_URL"):
             os.environ.pop(k, None)
+        if was_upstream:
+            os.environ.pop("FX_MODEL", None)
         stop_gateway()
         out = current_provider()
         out["saved"] = True
@@ -2385,6 +2389,7 @@ def apply_provider(name_or_url: str, model: str = "", api: str = "", key: str = 
     if hint and spec["id"] in ("vercel", "") and hint not in ("vercel", ""):
         return apply_provider(hint, model=model, api=api, key=key)
     load_env_file()
+    previous_id = provider_id_for(configured_upstream())
     current_model = os.environ.get("FX_MODEL", "")
     updates: dict[str, Optional[str]] = {
         "FX_UPSTREAM": spec["url"] or None,
@@ -2411,9 +2416,16 @@ def apply_provider(name_or_url: str, model: str = "", api: str = "", key: str = 
         updates["FX_UPSTREAM_API"] = None
         updates["FX_GATEWAY_BASE_URL"] = None
         updates["FX_GATEWAY_CHAT_URL"] = None
-    picked = (model or "").strip() or suggest_model(spec["id"], current_model)
+    explicit_model = (model or "").strip()
+    carry_model = current_model if previous_id == spec["id"] else ""
+    picked = explicit_model or suggest_model(spec["id"], carry_model)
     if picked:
         updates["FX_MODEL"] = picked
+    elif previous_id != spec["id"]:
+        # Provider switches must not leak a model chosen under another backend.
+        # In particular, switching back to Vercel lets native fx choose its own
+        # current default instead of baking one into this compatibility layer.
+        updates["FX_MODEL"] = None
     upsert_env(updates)
     for k, v in updates.items():
         if v:
