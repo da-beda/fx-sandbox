@@ -23,7 +23,16 @@ g = GATEWAY.read_text(encoding="utf-8")
 g = replace_once(
     g,
     "from urllib.parse import urlparse\n",
-    "from urllib.parse import urlparse\n\nimport search_policy\n",
+    '''from urllib.parse import urlparse
+
+# `extras/ui/gateway.py` is a symlink to this file. Resolve the real source
+# directory so sibling compatibility modules remain importable through either
+# entry point without duplicating them into the WebUI tree.
+_GATEWAY_MODULE_DIR = str(Path(__file__).resolve().parent)
+if _GATEWAY_MODULE_DIR not in sys.path:
+    sys.path.insert(0, _GATEWAY_MODULE_DIR)
+import search_policy
+''',
     "search policy import",
 )
 g = replace_once(
