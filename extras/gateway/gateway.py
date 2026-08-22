@@ -40,6 +40,7 @@ if _GATEWAY_MODULE_DIR not in sys.path:
     sys.path.insert(0, _GATEWAY_MODULE_DIR)
 import search_policy
 import responses_fidelity
+import tool_choice_fidelity
 
 LISTEN_DEFAULT = os.environ.get("FXS_GATEWAY_LISTEN", "127.0.0.1:18787")
 USER_AGENT = "fxs-gateway/1"
@@ -619,15 +620,7 @@ def tool_output_text(raw: Any) -> str:
 
 
 def tool_choice(raw: Any) -> Any:
-    if raw is None:
-        return None
-    if isinstance(raw, str):
-        return raw or None
-    if isinstance(raw, dict):
-        t = raw.get("type") or ""
-        if t in ("auto", "required", "none"):
-            return t
-    return None
+    return tool_choice_fidelity.translate(raw, "chat")
 
 
 # ---------------------------------------------------------------------------
@@ -647,10 +640,16 @@ def responses_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
         inbound = json.loads(body.decode() if body else b"{}")
     except json.JSONDecodeError:
         inbound = {}
-    reasoning = _responses_reasoning(inbound if isinstance(inbound, dict) else {})
+    inbound_dict = inbound if isinstance(inbound, dict) else {}
+    reasoning = _responses_reasoning(inbound_dict)
     if reasoning:
         out["reasoning"] = reasoning
-    responses_fidelity.apply_gateway_extensions(out, inbound)
+    choice = tool_choice_fidelity.translate(inbound_dict.get("toolChoice"), "responses")
+    if choice is not None:
+        out["tool_choice"] = choice
+    else:
+        out.pop("tool_choice", None)
+    responses_fidelity.apply_gateway_extensions(out, inbound_dict)
     return out
 
 
