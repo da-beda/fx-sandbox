@@ -1,0 +1,53 @@
+name: gateway-conformance
+
+on:
+  push:
+    paths:
+      - "extras/gateway/**"
+      - "extras/ui/**"
+      - ".github/workflows/gateway-conformance.yml"
+  pull_request:
+    paths:
+      - "extras/gateway/**"
+      - "extras/ui/**"
+      - ".github/workflows/gateway-conformance.yml"
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python compatibility (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Versions
+        run: python3 --version
+      - name: Gateway unit tests
+        run: python3 extras/gateway/test_gateway.py
+      - name: WebUI backend tests
+        run: python3 extras/ui/test_server.py
+
+  fx-stable:
+    name: Current stable fx through adapter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install current stable fx
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/fx-bin"
+          mkdir -p "$install_dir"
+          curl -fsSL https://fx.sh/setup.sh | FX_INSTALL_DIR="$install_dir" bash
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/fx" --version
+      - name: Run real-fx conformance
+        run: python3 extras/gateway/test_fx_conformance.py
