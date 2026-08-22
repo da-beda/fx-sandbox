@@ -25,39 +25,24 @@ version forever, or that a Linux container is identical to the host OS.
 8. **One host project tree.** The selected workspace is the only host project tree exposed by default.
 9. **Isolated state.** Each workspace gets its own private fxs home outside the project tree.
 10. **No host provisioning.** fxs never installs Docker, edits daemon configuration, adds package repositories, or changes group membership.
-11. **No provider or presentation implementation.** Provider protocols, catalogs, auth flows, model defaults, terminal presentation, browser UI and agent behavior remain upstream-owned.
+11. **No provider protocol logic in core.** Provider compatibility belongs in optional adapters.
 12. **Quiet runtime.** Successful startup does no installer work and emits no wrapper chatter unless `--verbose` is requested.
-13. **Upstream drift is tested, not mirrored.** Compatibility with the current stable fx release is exercised by CI/canary workflows instead of copying upstream implementation details into fxs.
 
 ## Authority boundary
 
-The default container has a read-only root filesystem, no Linux capabilities,
-`no-new-privileges`, an isolated `/tmp`, a non-root uid/gid matching the caller,
-and no Docker socket. The workspace is bind-mounted at `/workspace`. Per-project
-state is mounted at `/home/fx`.
+The default container has a read-only root filesystem, no Linux capabilities, `no-new-privileges`, an isolated `/tmp`, a non-root uid/gid matching the caller, and no Docker socket. The workspace is bind-mounted at `/workspace`. Per-project state is mounted at `/home/fx`.
 
-Outbound networking remains enabled because fx needs inference access. `--offline`
-removes container networking. Access to `host.docker.internal` is *not* added by
-default; `--host-gateway` is an explicit widening for local inference/services.
+Outbound networking remains enabled because fx needs inference access. `--offline` removes container networking. Access to `host.docker.internal` is *not* added by default; `--host-gateway` is an explicit widening for local inference/services.
 
-CPU, memory and PID limits are opt-in. Coding workloads should not fail because
-the wrapper guessed an undersized resource budget.
+CPU, memory and PID limits are opt-in. Coding workloads should not fail because the wrapper guessed an undersized resource budget.
 
 ## State and authentication
 
-Native `fx` owns native state and credentials under upstream's `~/.fx` rules.
-fxs never wraps or rewrites the native binary.
+Native `fx` owns native state and credentials under upstream's `~/.fx` rules. fxs never wraps or rewrites the native binary.
 
-Sandboxed fx state is intentionally separate under
-`~/.local/share/fxs/state/<workspace-hash>/home`. That prevents sessions/settings
-from different host projects from colliding even though each project appears as
-`/workspace` in its own container.
+Sandboxed fx state is intentionally separate under `~/.local/share/fxs/state/<workspace-hash>/home`. That prevents sessions/settings from different host projects from colliding even though each project appears as `/workspace` in its own container.
 
-Users authenticate sandboxed fx with ordinary upstream commands such as
-`fxs login` / `fxs setup`. Provider-specific subscription state is therefore
-stored by fx inside the isolated home instead of being reimplemented by fxs.
-Process credentials such as `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` may also
-be passed explicitly.
+Users can authenticate sandboxed fx with `fxs login` / `fxs setup`, or pass upstream-supported process credentials such as `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN`.
 
 ## Process semantics
 
@@ -100,16 +85,8 @@ For reproducible automation, build with `--fx-version <version>`. Explicit pins
 do not query the latest-release pointer. Tagged, signed fxs release images are
 another option when wrapper and image versions should move together.
 
-## Upstream compatibility strategy
+## Optional siblings
 
-fx is experimental and its product surface is changing quickly. fxs therefore
-tracks upstream through contracts rather than duplicated features:
+`extras/ui` and `extras/gateway` are retained as optional experiments. They are not installed, imported or required by core fxs. The core runtime has no Python dependency.
 
-- normal CI builds the current stable fx image and launches `--version` and
-  `--help` through the real fxs wrapper;
-- a scheduled upstream canary repeats that exercise even when this repository has
-  no new commits; and
-- shell policy tests keep provider/UI/runtime implementations out of core.
-
-Historical provider translation and browser UI prototypes are preserved on
-`archive/legacy-experiments-2026-08-22`, not maintained on `main`.
+`examples/docker-compose.yml` is illustrative only. `fxs` remains the single authoritative sandbox construction path.

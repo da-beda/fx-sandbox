@@ -1,0 +1,38 @@
+# Example only. `fxs` is the authoritative sandbox launcher.
+# This file is intentionally not installed by the core installer.
+services:
+  fx:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        FX_VERSION: ${FX_VERSION:-}
+    image: ${FXS_IMAGE:-fxs:latest}
+    working_dir: /workspace
+    read_only: true
+    init: true
+    stdin_open: true
+    tty: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev
+    volumes:
+      - type: bind
+        source: ${FXS_WORKSPACE:-..}
+        target: /workspace
+      - type: volume
+        source: fx-home
+        target: /home/fx
+    environment:
+      HOME: /home/fx
+      FX_PERMISSION_MODE: ${FX_PERMISSION_MODE:-yolo}
+      FX_NO_OPEN_BROWSER: "1"
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      VERCEL_OIDC_TOKEN: ${VERCEL_OIDC_TOKEN:-}
+      FX_MODEL: ${FX_MODEL:-}
+      FX_MAX_AGENT_STEPS: ${FX_MAX_AGENT_STEPS:-}
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  fx-home:

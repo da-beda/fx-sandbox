@@ -7,48 +7,45 @@ fx <args>  = native fx
 fxs <args> = upstream fx + an external container boundary
 ```
 
-`fx-sandbox` deliberately stays below the agent layer. It does not add a planner,
-provider implementation, model policy, custom auth system, browser UI, project
-configuration format, or alternate agent loop. Those belong to upstream
-[`vercel-labs/fx`](https://github.com/vercel-labs/fx).
+The project deliberately does not add a planner, provider layer, model policy,
+custom auth system, project config, or alternate agent loop. If upstream fx
+already solves something, fxs does not reimplement it.
 
-What `fxs` adds is a deliberately small external authority boundary around the
-unmodified upstream `fx` binary.
+"Same fx" means the unmodified upstream fx binary and agent loop. The container
+still has a deliberately different execution environment: isolated HOME/state,
+Linux filesystem/process semantics, a read-only image, and a different authority
+boundary. Native fx and an existing fxs image can also be on different fx
+versions until the image is rebuilt or updated.
 
-## What the boundary does
+## What fxs adds
 
-For one selected host project, `fxs`:
+`fxs` exposes one host project directory to a Docker container, runs as your
+uid/gid, uses a read-only image filesystem, drops all Linux capabilities,
+enables `no-new-privileges`, never mounts the Docker socket, and keeps fx state
+outside the project in a per-project home.
 
-- bind-mounts that project at `/workspace`;
-- keeps fx state in a private per-project home outside the repository;
-- runs as the calling uid/gid rather than root;
-- uses a read-only image root filesystem;
-- drops all Linux capabilities;
-- enables `no-new-privileges`;
-- supplies an isolated `/tmp`;
-- never mounts the Docker socket;
-- does not expose `host.docker.internal` unless explicitly requested; and
-- never falls back to native `fx` if Docker is unavailable.
+The default fx permission mode inside that boundary is `yolo`: Docker is the
+authority boundary, so fx does not need a second approval loop. Use `fxs --ask`
+or `fxs --auto` when you explicitly want fx's permission layer too.
 
-The default fx permission mode inside this boundary is `yolo`: Docker is the
-primary authority boundary. Use `fxs --ask` or `fxs --auto` when you explicitly
-want fx's approval layer as well.
+If Docker is unavailable, stopped, or the wrapper is run as root, **fxs exits**.
+It never falls back to native `fx`.
 
 ## Install
 
-The installer can install native fx, fxs, or both:
+The friendly installer lets you choose native fx, fxs, or both:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/install.sh | bash
 ```
 
-Non-interactive examples:
+For automation:
 
 ```bash
-# native fx + fxs (default when no TTY is available)
+# both (also the non-interactive default)
 curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/install.sh | bash -s -- --both
 
-# fxs only
+# sandbox wrapper only
 curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/install.sh | bash -s -- --fxs-only
 
 # native fx only
@@ -60,18 +57,18 @@ Native installation is delegated directly to fx's canonical installer at
 credentials, or modify native fx settings.
 
 Docker is a prerequisite for fxs and is **never installed or configured by this
-project**. If Docker is not running during installation, build the reference
-image later:
+project**. If Docker is already running, the installer builds the small reference
+image once. Otherwise install/start Docker yourself and run:
 
 ```bash
 fxs --build-image
 ```
 
-For reproducible automation, pin both projects:
+For reproducible automation, pin both sides:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/<fxs-tag>/install.sh \
-  | bash -s -- --both --fxs-ref <fxs-tag> --fx-version <fx-version>
+curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/v0.2.0/install.sh \
+  | bash -s -- --both --fxs-ref v0.2.0 --fx-version <fx-version>
 ```
 
 ## Use
@@ -82,40 +79,36 @@ fxs
 fxs ask "review this repository"
 fxs -c
 fxs --ask
-fxs --model <model-id>
+fxs --model <gateway-model-id>
 fxs --steps 40
 fxs --offline
 ```
 
-Wrapper-specific options must come before the first fx command/argument. Once
-`fxs` sees an unrecognized argument, the remainder is passed to fx unchanged.
-Use `--` to terminate fxs option parsing explicitly:
+Unknown arguments are passed to fx unchanged. Wrapper-specific options must come
+before the fx command/arguments; use `--` to end fxs option parsing explicitly.
 
-```bash
-fxs -- --help
-```
-
-`fxs` itself does not impose a model, step limit, context limit, tool-result
-limit, provider policy, or project `.fx.json`.
+`fxs --deep` and `fxs --autonomous` remain compatibility aliases for `--steps 0`,
+but unlimited steps are already upstream fx's default. fxs itself does not
+impose a step limit, model, tool-result limit, context setting, or `.fx.json`.
 
 ## Upstream process controls
 
 Exported upstream `FX_*` process controls are forwarded into the container
-automatically rather than mirrored in an fxs-maintained allowlist. That keeps
-tracing, recording, update synchronization, theming, and new upstream process
-controls usable without an fxs release just to add another variable name.
+automatically instead of being copied into an fxs-maintained allowlist. That
+means fx features such as tracing, recording, update synchronization, theming,
+and future upstream process controls can work without an fxs release merely to
+add another variable name.
 
-The explicit exceptions are boundary-owned values:
+The explicit exceptions are the few values owned by the containment boundary:
 
-- `FX_PERMISSION_MODE` is set by fxs (`yolo` by default, or `--ask` / `--auto`).
+- `FX_PERMISSION_MODE` is set from fxs policy (`yolo` by default, or `--ask` / `--auto`).
 - `FX_AUTO_UPGRADE=0` is forced because the image root filesystem is read-only.
-- `FX_NO_OPEN_BROWSER=1` is forced so container auth prints URLs instead of trying to open a host browser.
-- `FX_MODEL` and `FX_MAX_AGENT_STEPS` are forwarded explicitly so the fxs convenience flags work even when their shell variables were not exported.
+- `FX_NO_OPEN_BROWSER=1` is forced so container authentication prints URLs instead of trying to open a host browser.
+- `FX_MODEL` and `FX_MAX_AGENT_STEPS` are forwarded explicitly so `--model` and `--steps` work even when the shell variables were not exported.
 
-The upstream credentials `AI_GATEWAY_API_KEY` and `VERCEL_OIDC_TOKEN` are also
-passed when they are explicitly present in the host environment. Subscription
-login state created by commands such as `fxs login ...` lives in the isolated
-fxs home and does not require mounting native `~/.fx`.
+The two upstream credentials that do not use the `FX_` prefix,
+`AI_GATEWAY_API_KEY` and `VERCEL_OIDC_TOKEN`, are also passed when explicitly
+present in the host environment.
 
 ## Authentication and state
 
@@ -127,13 +120,13 @@ fx login
 fx setup
 ```
 
-Sandboxed fx has separate per-project state under:
+Sandboxed fx has a separate per-project home under:
 
 ```text
 ~/.local/share/fxs/state/<workspace-hash>/home
 ```
 
-Authenticate the sandboxed instance with the normal fx commands:
+Authenticate there with:
 
 ```bash
 fxs login
@@ -141,59 +134,53 @@ fxs login
 fxs setup
 ```
 
-Different host projects therefore do not silently share fx sessions or profile
-state, even though every container sees its selected project at `/workspace`.
+This isolation is intentional: native `~/.fx` is never mounted into the
+container and sessions from different host projects do not collide.
 
 ## fx versions and upgrades
 
-The **container image is the fx update unit**. Since the image root is read-only,
-fxs disables in-container self-upgrade:
+The **container image is the fx update unit**. Upstream fx can normally replace
+its own executable during auto-upgrade, but fxs intentionally runs a read-only
+image filesystem. To avoid a pointless/failing self-update path, fxs forces:
 
 ```text
 FX_AUTO_UPGRADE=0
 ```
 
-Refresh the reference image to the current stable fx release with:
+Update the reference image instead:
 
 ```bash
 fxs --build-image
 ```
 
-An unpinned refresh resolves `https://releases.fx.sh/latest.txt` on the host and
-passes that exact version into the Docker build. The fx version is therefore
-part of Docker's cache key; a newly published stable release cannot be hidden by
-an old cached installer layer.
-
-Native fx and an existing fxs image may legitimately differ. Compare explicitly
-when parity matters:
+An existing image can legitimately lag behind native fx. When exact parity
+matters, compare explicitly:
 
 ```bash
 fx --version
 fxs -- --version
 ```
 
-Pin an exact upstream release when reproducibility matters:
+For reproducibility, build with a pinned fx version:
 
 ```bash
 fxs --build-image --fx-version <version>
 ```
 
-## Tracking fast upstream development
+Tagged fxs releases also publish signed multi-architecture reference images and
+release artifacts so the wrapper and fx image can be pinned together.
 
-fx is experimental and changes quickly. `fx-sandbox` therefore avoids copying
-provider catalogs, provider protocols, terminal presentation, model defaults,
-or agent-loop behavior.
+## No startup writes to the repository
 
-CI validates the shell wrapper on Linux and macOS and exercises the current
-stable fx image. A scheduled **upstream canary** independently rebuilds the
-current stable fx release and runs a small wrapper/image contract smoke test, so
-a new fx release can break loudly even if this repository has had no recent
-commits.
+Starting fxs does not create `.fx.json`, copy helper files into the project, or
+rebuild its own installation. The first project write comes from fx/the agent
+itself.
 
-Historical provider-translation and browser-UI experiments that previously lived
-on `main` are preserved on the branch
-`archive/legacy-experiments-2026-08-22`; they are intentionally no longer part of
-the maintained surface.
+The normal runtime path is simply:
+
+```text
+fxs -> docker run -> fx
+```
 
 ## Resource and network policy
 
@@ -203,29 +190,25 @@ The wrapper does not guess a CPU or RAM budget. Limits are opt-in:
 fxs --memory 8g --cpus 8 --pids 1024
 ```
 
-Outbound networking is enabled by default because fx needs inference access.
-Disable it with:
+Outbound networking is enabled by default for inference. Disable it with
+`--offline`.
 
-```bash
-fxs --offline
-```
-
-`host.docker.internal` is not added by default. When local inference or another
-intentional host service requires it:
+`host.docker.internal` is **not** added by default. When local inference or
+another intentional host service requires it:
 
 ```bash
 fxs --host-gateway
 ```
 
-That explicitly widens the boundary.
+That is an explicit widening of the boundary.
 
 ## Custom development images
 
-`FXS_IMAGE` (or `--image`) may point to any image with an `fx` executable on
-`PATH`. A project-specific image can therefore provide its own compilers and SDKs
-while fxs supplies containment.
+`FXS_IMAGE` (or `--image`) may point to any image that has an `fx` executable on
+`PATH`. This lets the project image supply compilers/SDKs while fxs supplies
+containment.
 
-One simple pattern is to copy fx from the reference image:
+A simple pattern is to inject the fx binary from the reference image:
 
 ```Dockerfile
 FROM fxs:latest AS fxs
@@ -233,7 +216,7 @@ FROM my-project-dev:latest
 COPY --from=fxs /usr/local/bin/fx /usr/local/bin/fx
 ```
 
-Then run:
+Then:
 
 ```bash
 docker build -t my-project-fxs -f Dockerfile.fxs .
@@ -243,12 +226,28 @@ FXS_IMAGE=my-project-fxs fxs
 No automatic Dev Container orchestration is added; that would turn the wrapper
 back into a framework.
 
+## Optional siblings
+
+The core installation has no Python dependency and does not include provider
+translation or a browser UI.
+
+- `extras/gateway/` retains the OpenAI-compatible translation experiment.
+- `extras/ui/` retains the browser UI experiment.
+- `examples/docker-compose.yml` is illustrative only; `fxs` is the authoritative sandbox launcher.
+
+These extras can evolve or disappear independently without changing the core
+containment contract.
+
 ## Security boundary
 
-The selected workspace is intentionally readable by the agent and may be sent in
-model/tool context. Credentials passed into the container are readable by code
-executing inside that container. Docker limits host authority; it does not hide
-in-container secrets from the workload.
+The selected workspace is available to the agent and can be uploaded in
+model/tool context. A credential passed into the container is also readable by
+code executing inside that container. The Docker boundary protects the host; it
+does not magically hide in-container credentials from the workload.
+
+A host-side credential/inference broker is the preferred future hardening for
+reusable secrets, but it should remain a separate component rather than
+expanding core fxs.
 
 See [docs/DESIGN.md](docs/DESIGN.md) and
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
@@ -260,6 +259,6 @@ bash -n fxs install.sh setup-fx.sh tests/*.sh
 bash tests/run.sh
 ```
 
-CI runs the shell tests on Linux and macOS and verifies the wrapper against a
-freshly built current-stable fx image. Tagged releases build and keylessly sign
+CI runs the shell tests on Linux and macOS and builds the reference image through
+fx's live canonical installer. Tagged releases also build and keylessly sign
 multi-architecture reference images for `linux/amd64` and `linux/arm64`.
