@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
 import stat
 import sys
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
@@ -30,9 +28,12 @@ if args == ["--help"]:
     print("fx help")
     raise SystemExit(0)
 if args == ["setup", "openai-compatible", "--help"]:
+    # Mirrors fx 0.0.5's surprising behavior: an unknown setup target may
+    # still return successful help. The probe must ignore this unless the
+    # parent setup surface first advertises openai-compatible.
     if mode == "legacy":
-        print("unknown setup target")
-        raise SystemExit(2)
+        print("generic setup help")
+        raise SystemExit(0)
     if mode == "chat":
         print("OpenAI-compatible Chat Completions; configure FX_OPENAI_BASE_URL")
     else:
@@ -63,6 +64,7 @@ class NativeFxProbe(unittest.TestCase):
         self.assertFalse(got.openai_compatible)
         self.assertFalse(got.openai_chat)
         self.assertFalse(got.openai_responses)
+        self.assertEqual(got.evidence, ())
 
     def test_chat_only_native_surface_keeps_responses_on_adapter(self):
         with tempfile.TemporaryDirectory() as td:
