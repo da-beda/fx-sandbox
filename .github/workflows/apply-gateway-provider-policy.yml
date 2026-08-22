@@ -1,0 +1,39 @@
+name: apply-gateway-provider-policy
+
+on:
+  push:
+    branches: [gateway/provider-policy]
+    paths:
+      - "tools/apply_gateway_provider_policy.py"
+      - ".github/workflows/apply-gateway-provider-policy.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: gateway/provider-policy
+          fetch-depth: 0
+      - name: Apply focused refactor
+        run: python3 tools/apply_gateway_provider_policy.py
+      - name: Verify
+        run: |
+          python3 -m py_compile extras/gateway/gateway.py extras/gateway/test_gateway.py
+          python3 extras/gateway/test_gateway.py
+          python3 extras/gateway/test_native_fx.py
+          git diff --check
+      - name: Commit transformed sources
+        run: |
+          set -euo pipefail
+          rm tools/apply_gateway_provider_policy.py
+          rm .github/workflows/apply-gateway-provider-policy.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: stop owning upstream gateway model defaults"
+          git push origin HEAD:gateway/provider-policy
