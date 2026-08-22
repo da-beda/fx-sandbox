@@ -47,13 +47,29 @@ The WebUI can retain a Vercel AI Gateway key for web search while the main model
 
 This keeps the search feature while removing the maintenance dependency on whichever model happens to be upstream `fx`'s product default that week.
 
+## Protocol fidelity is executable
+
+`fidelity_matrix.py` probes semantic translation cases instead of relying on a hand-maintained feature checklist:
+
+```bash
+python3 extras/gateway/fidelity_matrix.py
+python3 extras/gateway/fidelity_matrix.py --json
+```
+
+The matrix currently covers text, output limits, tool schemas/history, named tool choice, reasoning, image input, structured output, streamed text, streamed tool calls, and streamed reasoning for both Chat Completions and Responses paths. `pass` means the semantic case is preserved; `degraded` means the request is accepted or partially translated but some semantics are lost or rejected.
+
+The current matrix deliberately records known gaps rather than hiding them. In particular, image file parts and `responseFormat` are not yet preserved, named tool pinning is dropped, and Chat-mode reasoning is not forwarded. Responses already preserves reasoning and reasoning deltas. These rows are frozen in CI so a future fidelity PR must change the evidence and expectations together.
+
+This is also the migration contract for native upstream support: a native transport being present is not sufficient by itself. The WebUI should prefer native `fx` for a capability only when the installed binary's required semantics are proven equivalent or better for that use case.
+
 ## Compatibility contract
 
-The adapter is tested at two levels:
+The adapter is tested at multiple levels:
 
 ```bash
 python3 extras/gateway/test_gateway.py
 python3 extras/gateway/test_search_policy.py
+python3 extras/gateway/test_fidelity_matrix.py
 python3 extras/gateway/test_native_fx.py
 python3 extras/ui/test_server.py
 ```
@@ -65,6 +81,6 @@ python3 extras/gateway/native_fx.py --json --probe-transport
 python3 extras/gateway/test_fx_conformance.py
 ```
 
-Both checks are credential-free. Together they distinguish two independent facts: whether native `fx` can replace a compatibility path, and whether the adapter still works with the real current `fx` Gateway contract.
+Both checks are credential-free. Together they distinguish three independent facts: whether native `fx` can replace a compatibility path, whether the adapter still works with the real current `fx` Gateway contract, and whether feature semantics are being preserved rather than silently dropped.
 
 The adapter is not installed by `install.sh`, and Python is not part of the minimal reference `fxs` image. It remains an optional sibling component rather than part of the containment runtime.
