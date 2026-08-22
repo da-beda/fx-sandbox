@@ -57,6 +57,50 @@ assert_has "$out" "FX_FUTURE_TEST"
 assert_has "$out" "FX_AUTO_UPGRADE=0"
 assert_not_has "$out" "FX_AUTO_UPGRADE=1"
 
+# An unpinned image refresh resolves the current stable fx version on the host
+# and passes that exact value as a Docker build arg. This makes the upstream fx
+# version part of Docker's cache key instead of hiding a new release behind a
+# cached RUN layer. Explicit pins must bypass the latest-version lookup.
+mkdir -p "$TMP/buildbin"
+cat > "$TMP/buildbin/docker" <<'EOF_DOCKER'
+#!/usr/bin/env bash
+case "${1:-}" in
+  info) exit 0 ;;
+  build)
+    shift
+    printf '%s\n' "$@" > "${FXS_BUILD_LOG:?}"
+    exit 0
+    ;;
+  *) exit 0 ;;
+esac
+EOF_DOCKER
+cat > "$TMP/buildbin/curl" <<'EOF_CURL'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FXS_CURL_LOG:?}"
+printf '0.0.99\n'
+EOF_CURL
+chmod +x "$TMP/buildbin/docker" "$TMP/buildbin/curl"
+: > "$TMP/curl.log"
+PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
+  FXS_BUILD_LOG="$TMP/build.log" FXS_CURL_LOG="$TMP/curl.log" \
+  FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
+  "$FXS" --build-image >/dev/null
+build_out="$(cat "$TMP/build.log")"
+assert_has "$build_out" "--build-arg"
+assert_has "$build_out" "FX_VERSION=0.0.99"
+curl_out="$(cat "$TMP/curl.log")"
+assert_has "$curl_out" "https://releases.fx.sh/latest.txt"
+
+curl_before="$curl_out"
+PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
+  FXS_BUILD_LOG="$TMP/build.log" FXS_CURL_LOG="$TMP/curl.log" \
+  FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
+  "$FXS" --build-image --fx-version 9.9.9 >/dev/null
+build_out="$(cat "$TMP/build.log")"
+assert_has "$build_out" "FX_VERSION=9.9.9"
+curl_after="$(cat "$TMP/curl.log")"
+[[ "$curl_after" == "$curl_before" ]] || fail "pinned build unexpectedly resolved latest fx"
+
 out="$(HOME="$TMP/home" "$FXS" --dry-run -w "$TMP/project" --ask --host-gateway --memory 4g --cpus 6 --pids 512)"
 assert_has "$out" "FX_PERMISSION_MODE=ask"
 assert_has "$out" "host.docker.internal:host-gateway"

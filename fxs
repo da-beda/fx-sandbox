@@ -52,7 +52,7 @@ FXS OPTIONS
   --pids N                  optional Docker PID limit
   --ephemeral               do not persist the isolated fx home
   --image IMAGE             image containing fx (default: fxs:latest)
-  --build-image             explicitly build the reference image, then exit
+  --build-image             build/refresh image with current stable fx
   --fx-version VERSION      pin fx when used with --build-image
   --dry-run                 print the docker command, do not execute it
   --verbose                 print sandbox metadata before launch
@@ -98,6 +98,25 @@ hash_path() {
   else
     die "need sha256sum or shasum"
   fi
+}
+
+resolve_latest_fx_version() {
+  local version=""
+  if command -v curl >/dev/null 2>&1; then
+    version="$(curl -fsSL https://releases.fx.sh/latest.txt)" \
+      || die "could not resolve the latest stable fx release"
+  elif command -v wget >/dev/null 2>&1; then
+    version="$(wget -qO- https://releases.fx.sh/latest.txt)" \
+      || die "could not resolve the latest stable fx release"
+  else
+    die "curl or wget is required to resolve the latest stable fx release"
+  fi
+  version="$(printf '%s' "$version" | tr -d '[:space:]')"
+  [[ -n "$version" ]] || die "latest stable fx release response was empty"
+  case "$version" in
+    *[!0-9A-Za-z._+-]*) die "invalid latest fx release: $version" ;;
+  esac
+  printf '%s\n' "$version"
 }
 
 is_dangerous_workspace() {
@@ -193,10 +212,12 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
       die "reference Dockerfile not found: $DOCKERFILE"
     fi
   }
-  build=(docker build --tag "$IMAGE" --file "$DOCKERFILE")
-  [[ -n "$FX_VERSION" ]] && build+=(--build-arg "FX_VERSION=$FX_VERSION")
+  if [[ -z "$FX_VERSION" ]]; then
+    FX_VERSION="$(resolve_latest_fx_version)"
+  fi
+  build=(docker build --tag "$IMAGE" --file "$DOCKERFILE" --build-arg "FX_VERSION=$FX_VERSION")
   build+=("$(dirname "$DOCKERFILE")")
-  log "building $IMAGE"
+  log "building $IMAGE with fx $FX_VERSION"
   exec "${build[@]}"
 fi
 
