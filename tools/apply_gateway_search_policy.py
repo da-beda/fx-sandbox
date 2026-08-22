@@ -12,6 +12,13 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_count(text: str, old: str, new: str, expected: int, label: str) -> str:
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(f"{label}: expected exactly {expected} matches, got {count}")
+    return text.replace(old, new)
+
+
 g = GATEWAY.read_text(encoding="utf-8")
 g = replace_once(
     g,
@@ -93,10 +100,11 @@ GATEWAY.write_text(g, encoding="utf-8")
 
 
 t = TESTS.read_text(encoding="utf-8")
-t = replace_once(
+t = replace_count(
     t,
     '            "PERPLEXITY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY",\n',
     '            "PERPLEXITY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY",\n            "FXS_VERCEL_SEARCH_MODEL",\n',
+    2,
     "test env cleanup",
 )
 t = replace_once(
