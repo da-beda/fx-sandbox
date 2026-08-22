@@ -3,6 +3,7 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,7 +15,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Syntax
         run: bash -n fxs install.sh setup-fx.sh tests/*.sh
       - name: Tests
@@ -23,11 +24,17 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build/refresh reference image through fxs
         env:
           FXS_IMAGE: fxs-ci
           FXS_DOCKERFILE: ${{ github.workspace }}/Dockerfile
         run: ./fxs --build-image --verbose
-      - name: Verify fx in reference image
-        run: docker run --rm fxs-ci fx --version
+      - name: Exercise current stable fx through the real wrapper
+        env:
+          FXS_IMAGE: fxs-ci
+          FXS_STATE_ROOT: ${{ runner.temp }}/fxs-state
+        run: |
+          ./fxs -- --version
+          ./fxs -- --help > /tmp/fx-help.txt
+          test -s /tmp/fx-help.txt

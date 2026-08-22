@@ -1,0 +1,55 @@
+name: upstream-canary
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-canary
+  cancel-in-progress: true
+
+jobs:
+  stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve current stable fx
+        id: fx
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL https://releases.fx.sh/latest.txt | tr -d '[:space:]')"
+          [[ -n "$version" ]]
+          case "$version" in
+            *[!0-9A-Za-z._+-]*) echo "invalid fx version: $version" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          printf '### Upstream fx canary\n\nTesting stable fx `%s`.\n' "$version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build exact current stable image
+        env:
+          FXS_IMAGE: fxs-upstream-canary
+          FXS_DOCKERFILE: ${{ github.workspace }}/Dockerfile
+        run: ./fxs --build-image --fx-version "${{ steps.fx.outputs.version }}" --verbose
+
+      - name: Exercise wrapper/image contract
+        env:
+          FXS_IMAGE: fxs-upstream-canary
+          FXS_STATE_ROOT: ${{ runner.temp }}/fxs-state
+        run: |
+          set -euo pipefail
+          ./fxs -- --version
+          ./fxs -- --help > /tmp/fx-help.txt
+          test -s /tmp/fx-help.txt
+
+          ./fxs --dry-run --offline --read-only-workspace > /tmp/fxs-command.txt
+          grep -Fq -- '--read-only' /tmp/fxs-command.txt
+          grep -Fq -- 'no-new-privileges:true' /tmp/fxs-command.txt
+          grep -Fq -- '--cap-drop' /tmp/fxs-command.txt
+          grep -Fq -- '--network none' /tmp/fxs-command.txt
+          grep -Fq -- 'FX_AUTO_UPGRADE=0' /tmp/fxs-command.txt
