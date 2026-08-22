@@ -51,7 +51,7 @@ jobs:
           curl -fsSL https://fx.sh/setup.sh | FX_INSTALL_DIR="$install_dir" bash
           echo "$install_dir" >> "$GITHUB_PATH"
           "$install_dir/fx" --version
-      - name: Snapshot native provider capabilities
-        run: python3 extras/gateway/native_fx.py --json
-      - name: Run real-fx conformance
+      - name: Probe native OpenAI-compatible transport
+        run: python3 extras/gateway/native_fx.py --json --probe-transport --timeout 15
+      - name: Run real-fx adapter conformance
         run: python3 extras/gateway/test_fx_conformance.py
