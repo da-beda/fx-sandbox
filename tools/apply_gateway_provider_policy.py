@@ -125,6 +125,12 @@ GATEWAY.write_text(g, encoding="utf-8")
 t = TESTS.read_text(encoding="utf-8")
 t = replace_once(
     t,
+    '        self.assertEqual(gateway.suggest_model("xai", "zai/glm-5.2"), "grok-4")\n        self.assertEqual(gateway.suggest_model("openai", ""), "gpt-4o")\n        self.assertEqual(gateway.suggest_model("vercel", "grok-4"), "zai/glm-5.2")\n',
+    '        # suggest_model no longer guesses model provenance from magic ids;\n        # callers carry a current model only when staying on that provider.\n        self.assertEqual(gateway.suggest_model("xai", "zai/glm-5.2"), "zai/glm-5.2")\n        self.assertEqual(gateway.suggest_model("openai", ""), "gpt-4o")\n        self.assertEqual(gateway.suggest_model("vercel", "grok-4"), "")\n',
+    "suggest_model provenance contract",
+)
+t = replace_once(
+    t,
     '        self.assertEqual(saved["FX_MODEL"], "zai/glm-5.2")\n',
     '        self.assertNotIn("FX_MODEL", saved)\n',
     "Vercel switch expectation",
