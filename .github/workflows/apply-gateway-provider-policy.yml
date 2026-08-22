@@ -6,13 +6,18 @@ on:
     paths:
       - "tools/apply_gateway_provider_policy.py"
       - ".github/workflows/apply-gateway-provider-policy.yml"
+  pull_request:
+    branches: [gateway/native-provider-probe]
+    paths:
+      - "tools/apply_gateway_provider_policy.py"
+      - ".github/workflows/apply-gateway-provider-policy.yml"
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'gateway/provider-policy')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
