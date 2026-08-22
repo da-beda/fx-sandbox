@@ -20,7 +20,7 @@ version forever, or that a Linux container is identical to the host OS.
 3. **No model policy.** If `FX_MODEL` is unset, fx resolves its own model exactly as upstream defines it.
 4. **No agent-loop policy.** Step count, context and tool-result retention stay at upstream fx defaults unless the user explicitly overrides them.
 5. **One deliberate permission override.** `fxs` defaults `FX_PERMISSION_MODE=yolo` because Docker is the authority boundary. `--ask` and `--auto` are explicit alternatives.
-6. **The image is the update unit.** The root filesystem is read-only, so `fxs` forces `FX_AUTO_UPGRADE=0`. Upgrade by rebuilding/pulling the image; pin fx at image build time when reproducibility matters.
+6. **The image is the update unit.** The root filesystem is read-only, so `fxs` forces `FX_AUTO_UPGRADE=0`. An unpinned `fxs --build-image` resolves fx's current stable release on the host and passes that exact version into the Docker build, making the fx version part of the cache key. Explicit `--fx-version` pins bypass that lookup.
 7. **Upstream process controls pass through.** Exported `FX_*` controls are forwarded generically instead of being maintained as a semantic allowlist. Wrapper-owned controls are the explicit exceptions.
 8. **One host project tree.** The selected workspace is the only host project tree exposed by default.
 9. **Isolated state.** Each workspace gets its own private fxs home outside the project tree.
@@ -68,14 +68,22 @@ fx --version
 fxs -- --version
 ```
 
-Rebuild the reference image to pick up current upstream fx:
+Refresh the reference image to the current stable upstream fx release:
 
 ```bash
 fxs --build-image
 ```
 
-For reproducible automation, build with `--fx-version <version>` or use a tagged,
-signed fxs release image.
+For an unpinned refresh, `fxs` first resolves `https://releases.fx.sh/latest.txt`
+on the host, then passes the exact result as `FX_VERSION=<version>` to the Docker
+build. Because the resolved version is part of Docker's build arguments, a new fx
+release changes the cache key and cannot be hidden behind a previously cached
+installer layer. Rebuilding while the stable fx version is unchanged can still
+reuse Docker's cache.
+
+For reproducible automation, build with `--fx-version <version>`. Explicit pins
+do not query the latest-release pointer. Tagged, signed fxs release images are
+another option when wrapper and image versions should move together.
 
 ## Optional siblings
 
