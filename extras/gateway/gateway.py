@@ -39,6 +39,7 @@ _GATEWAY_MODULE_DIR = str(Path(__file__).resolve().parent)
 if _GATEWAY_MODULE_DIR not in sys.path:
     sys.path.insert(0, _GATEWAY_MODULE_DIR)
 import search_policy
+import responses_fidelity
 
 LISTEN_DEFAULT = os.environ.get("FXS_GATEWAY_LISTEN", "127.0.0.1:18787")
 USER_AGENT = "fxs-gateway/1"
@@ -485,7 +486,13 @@ class TranslateError(ValueError):
         self.code = code
 
 
-def chat_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
+def chat_request(
+    model: str,
+    stream: bool,
+    body: bytes,
+    *,
+    allow_image_only: bool = False,
+) -> dict[str, Any]:
     if not (model or "").strip():
         raise TranslateError(ERR_MISSING_MODEL, ERR_MISSING_MODEL)
     try:
@@ -505,7 +512,7 @@ def chat_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
         if (msg or {}).get("role") == "user":
             last_user_image_only = image_only
         out["messages"].extend(converted)
-    if last_user_image_only:
+    if last_user_image_only and not allow_image_only:
         raise TranslateError(ERR_IMAGE_ONLY, ERR_IMAGE_ONLY)
 
     tools = []
@@ -633,7 +640,9 @@ def responses_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
     store is always false: a coding-agent sandbox should not leave prompts
     on the provider's servers.
     """
-    out = responses_from_chat(chat_request(model, stream, body))
+    out = responses_from_chat(
+        chat_request(model, stream, body, allow_image_only=True)
+    )
     try:
         inbound = json.loads(body.decode() if body else b"{}")
     except json.JSONDecodeError:
@@ -641,6 +650,7 @@ def responses_request(model: str, stream: bool, body: bytes) -> dict[str, Any]:
     reasoning = _responses_reasoning(inbound if isinstance(inbound, dict) else {})
     if reasoning:
         out["reasoning"] = reasoning
+    responses_fidelity.apply_gateway_extensions(out, inbound)
     return out
 
 

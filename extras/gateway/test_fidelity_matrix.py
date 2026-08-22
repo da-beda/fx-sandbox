@@ -50,10 +50,12 @@ class FidelityMatrix(unittest.TestCase):
                 self.assertEqual(self.rows[feature].responses, responses)
 
     def test_known_gaps_are_not_silently_promoted(self):
-        for feature in ("named_tool_choice", "image_input", "structured_output"):
+        self.assertEqual(self.rows["named_tool_choice"].chat, "degraded")
+        self.assertEqual(self.rows["named_tool_choice"].responses, "degraded")
+        for feature in ("image_input", "structured_output"):
             with self.subTest(feature=feature):
                 self.assertEqual(self.rows[feature].chat, "degraded")
-                self.assertEqual(self.rows[feature].responses, "degraded")
+                self.assertEqual(self.rows[feature].responses, "pass")
 
     def test_json_cli_is_machine_readable(self):
         proc = subprocess.run(
