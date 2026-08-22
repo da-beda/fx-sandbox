@@ -15,16 +15,29 @@ The intended migration rule is conservative:
 - do not emulate upstream provider policy when transport translation is sufficient;
 - never remove the WebUI or provider paths merely because an overlapping upstream implementation exists.
 
+## Native handoff gate
+
+Do not infer native provider support from an `fx` version number. `native_fx.py` probes the installed CLI's observable setup contract instead:
+
+```bash
+python3 extras/gateway/native_fx.py --json
+```
+
+The probe is intentionally conservative. Native Chat Completions is considered available only when `fx setup` explicitly advertises an OpenAI-compatible target and its detailed help succeeds. Native Responses support requires additional explicit Responses/API-style evidence. A generic OpenAI-compatible label is not enough to retire the adapter's Responses path.
+
+This gives the WebUI and future migration work a stable rule: switch a provider path to native `fx` only after the installed binary itself proves the required capability. Until then, keep using the adapter.
+
 ## Compatibility contract
 
 The adapter is tested at two levels:
 
 ```bash
 python3 extras/gateway/test_gateway.py
+python3 extras/gateway/test_native_fx.py
 python3 extras/ui/test_server.py
 ```
 
-CI additionally installs the current stable `fx` and runs it end-to-end through this adapter against a deterministic fake OpenAI-compatible server in both Chat Completions and Responses modes:
+CI additionally installs the current stable `fx`, records its native-provider capability snapshot, and runs it end-to-end through this adapter against a deterministic fake OpenAI-compatible server in both Chat Completions and Responses modes:
 
 ```bash
 python3 extras/gateway/test_fx_conformance.py
