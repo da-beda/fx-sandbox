@@ -326,9 +326,11 @@ class Provider(unittest.TestCase):
         )
 
     def test_suggest_model(self):
-        self.assertEqual(gateway.suggest_model("xai", "zai/glm-5.2"), "grok-4")
+        # suggest_model no longer guesses model provenance from magic ids;
+        # callers carry a current model only when staying on that provider.
+        self.assertEqual(gateway.suggest_model("xai", "zai/glm-5.2"), "zai/glm-5.2")
         self.assertEqual(gateway.suggest_model("openai", ""), "gpt-4o")
-        self.assertEqual(gateway.suggest_model("vercel", "grok-4"), "zai/glm-5.2")
+        self.assertEqual(gateway.suggest_model("vercel", "grok-4"), "")
         self.assertEqual(gateway.suggest_model("vercel", "anthropic/claude-sonnet-4.6"), "anthropic/claude-sonnet-4.6")
         self.assertEqual(
             gateway.suggest_model("xai", "zai/glm-5.2", ["grok-3", "grok-4"]),
@@ -763,7 +765,15 @@ class IsolatedApply(unittest.TestCase):
         saved = gateway.parse_env_file(gateway.ENV_FILE)
         self.assertNotIn("FX_UPSTREAM", saved)
         self.assertNotIn("FX_UPSTREAM_API", saved)
-        self.assertEqual(saved["FX_MODEL"], "zai/glm-5.2")
+        self.assertNotIn("FX_MODEL", saved)
+
+    def test_switching_provider_uses_target_policy_not_previous_model(self):
+        gateway.apply_provider("xai")
+        out = gateway.apply_provider("openrouter")
+        self.assertEqual(out["id"], "openrouter")
+        self.assertEqual(out["model"], "stealth/ox-alpha")
+        saved = gateway.parse_env_file(gateway.ENV_FILE)
+        self.assertEqual(saved["FX_MODEL"], "stealth/ox-alpha")
 
     def test_apply_custom_url_appends_v1(self):
         out = gateway.apply_provider("https://example.com")
@@ -791,6 +801,7 @@ class IsolatedApply(unittest.TestCase):
         self.assertEqual(saved["AI_GATEWAY_API_KEY"], "vck_abc")
         self.assertNotIn("OPENAI_API_KEY", saved)
         self.assertNotIn("FX_UPSTREAM", saved)
+        self.assertNotIn("FX_MODEL", saved)
 
     def test_print_env(self):
         text = gateway.print_env("127.0.0.1:18787")
