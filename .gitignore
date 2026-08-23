@@ -3,6 +3,7 @@
 !.env.example
 *.key
 *.pem
+*.py[cod]
+**/__pycache__/
 .DS_Store
 .fx-home/
-web/__pycache__/
