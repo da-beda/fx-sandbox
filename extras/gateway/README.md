@@ -43,6 +43,10 @@ A streaming provider must produce terminal evidence before the adapter commits a
 
 A bare transport EOF is **not** terminal evidence. If an upstream server emits partial text or tool arguments and then disconnects without one of the terminal conditions above, the adapter emits an error finish rather than manufacturing `stop`. This prevents a truncated local-model response from being recorded as a successful agent turn. `[DONE]` without a preceding finish chunk remains accepted for compatible servers that use the sentinel itself as the terminal marker.
 
+Cancellation is handled separately from completion integrity. While a provider response is streaming, the adapter watches the downstream loopback socket without consuming its bytes. If fx cancels the turn and closes that socket, the watcher aborts only the corresponding upstream urllib/http.client socket so a blocking provider `readline()` wakes immediately. The cancelled handler then returns without trying to write an error onto the already-closed fx connection.
+
+This is deliberately **not** implemented by shortening the provider timeout. The existing long timeout remains available for slow local models, large cold starts, and long reasoning pauses; only an observed downstream disconnect interrupts the upstream response. Socket-level tests cover nested urllib socket discovery, blocked-read wakeup, non-consuming `MSG_PEEK`, live-peer shutdown, and close-only response doubles.
+
 ## Vercel-backed search with another LLM provider
 
 The WebUI can retain a Vercel AI Gateway key for web search while the main model runs through OpenRouter, xAI, Ollama, or another OpenAI-compatible endpoint. That search path must not copy upstream `fx`'s current default model into this repository.
@@ -87,6 +91,7 @@ python3 extras/gateway/test_gateway.py
 python3 extras/gateway/test_search_policy.py
 python3 extras/gateway/test_responses_fidelity.py
 python3 extras/gateway/test_tool_choice_fidelity.py
+python3 extras/gateway/test_stream_cancel.py
 python3 extras/gateway/test_fidelity_matrix.py
 python3 extras/gateway/test_native_fx.py
 python3 extras/ui/test_server.py

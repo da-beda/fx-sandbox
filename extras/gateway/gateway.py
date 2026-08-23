@@ -41,6 +41,7 @@ if _GATEWAY_MODULE_DIR not in sys.path:
 import search_policy
 import responses_fidelity
 import tool_choice_fidelity
+import stream_cancel
 
 LISTEN_DEFAULT = os.environ.get("FXS_GATEWAY_LISTEN", "127.0.0.1:18787")
 USER_AGENT = "fxs-gateway/1"
@@ -2008,15 +2009,24 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     return
                 conv = ResponseStream(allowed) if used_responses else Stream(allowed)
             first = False
+            watcher = stream_cancel.DisconnectWatcher(self.connection, resp)
             try:
-                saw_done = False
-                for data in read_sse_data(resp):
-                    if data.strip() == "[DONE]":
-                        saw_done = True
-                        break
-                    self._write_search_events(conv.consume(data), conv)
-                self._write_search_events(conv.close(terminal=saw_done), conv)
+                with watcher:
+                    saw_done = False
+                    for data in read_sse_data(resp):
+                        if data.strip() == "[DONE]":
+                            saw_done = True
+                            break
+                        self._write_search_events(conv.consume(data), conv)
+                    # When fx closes the downstream request, the watcher aborts
+                    # the upstream socket to wake a blocking readline(). Do not
+                    # try to emit an error/finish onto a connection that is gone.
+                    if watcher.cancelled.is_set():
+                        return
+                    self._write_search_events(conv.close(terminal=saw_done), conv)
             except Exception as e:
+                if watcher.cancelled.is_set():
+                    return
                 self._write_events(conv.fail(str(e)))
                 return
             finally:
