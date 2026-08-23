@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   shell:
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -22,6 +23,7 @@ jobs:
         run: bash tests/run.sh
 
   image:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -35,6 +37,22 @@ jobs:
           FXS_IMAGE: fxs-ci
           FXS_STATE_ROOT: ${{ runner.temp }}/fxs-state
         run: |
+          set -euo pipefail
           ./fxs -- --version
           ./fxs -- --help > /tmp/fx-help.txt
           test -s /tmp/fx-help.txt
+
+  extras:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Retained gateway tests
+        run: python3 extras/gateway/test_gateway.py
+      - name: Retained UI tests
+        run: python3 extras/ui/test_server.py
+      - name: Validate illustrative Compose shape
+        env:
+          FXS_UID: "1000"
+          FXS_GID: "1000"
+        run: docker compose -f examples/docker-compose.yml config >/tmp/fxs-compose.yml
