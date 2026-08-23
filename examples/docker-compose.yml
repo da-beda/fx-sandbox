@@ -1,38 +1,46 @@
 # Example only. `fxs` is the authoritative sandbox launcher.
 # This file is intentionally not installed by the core installer.
+#
+# Build/refresh the image through fxs first so fx version resolution, base-image
+# refresh, and cache behavior follow the authoritative path:
+#
+#   fxs --build-image
+#
+# Then run this illustrative shape with the host caller uid/gid:
+#
+#   FXS_UID="$(id -u)" FXS_GID="$(id -g)" docker compose -f examples/docker-compose.yml run --rm fx
+#
+# Unlike fxs, this example uses an ephemeral HOME and does not implement
+# per-project persistent state. Prefer fxs for normal use.
 services:
   fx:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-      args:
-        FX_VERSION: ${FX_VERSION:-}
     image: ${FXS_IMAGE:-fxs:latest}
     working_dir: /workspace
+    user: "${FXS_UID:-1000}:${FXS_GID:-1000}"
     read_only: true
     init: true
     stdin_open: true
     tty: true
     tmpfs:
       - /tmp:rw,nosuid,nodev
+      - /home/fx:rw,nosuid,nodev,uid=${FXS_UID:-1000},gid=${FXS_GID:-1000},mode=700
     volumes:
       - type: bind
         source: ${FXS_WORKSPACE:-..}
         target: /workspace
-      - type: volume
-        source: fx-home
-        target: /home/fx
     environment:
-      HOME: /home/fx
-      FX_PERMISSION_MODE: ${FX_PERMISSION_MODE:-yolo}
-      FX_NO_OPEN_BROWSER: "1"
-      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
-      VERCEL_OIDC_TOKEN: ${VERCEL_OIDC_TOKEN:-}
-      FX_MODEL: ${FX_MODEL:-}
-      FX_MAX_AGENT_STEPS: ${FX_MAX_AGENT_STEPS:-}
-    cap_drop: [ALL]
+      - HOME=/home/fx
+      - FX_PERMISSION_MODE=${FX_PERMISSION_MODE:-yolo}
+      - FX_AUTO_UPGRADE=0
+      - FX_NO_OPEN_BROWSER=1
+      # Single-key entries preserve absence: Compose passes the host value only
+      # when it exists instead of injecting an empty override into fx.
+      - AI_GATEWAY_API_KEY
+      - VERCEL_OIDC_TOKEN
+      - FX_MODEL
+      - FX_MAX_AGENT_STEPS
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
-
-volumes:
-  fx-home:
+    network_mode: ${FXS_NETWORK:-bridge}
