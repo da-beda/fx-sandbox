@@ -84,7 +84,7 @@ abs_dir() {
   local p="$1"
   case "$p" in
     '~') p="$HOME" ;;
-    '~/'*) p="${HOME}/${p#~/}" ;;
+    \~/*) p="${HOME}/${p:2}" ;;
   esac
   [[ -d "$p" ]] || die "workspace is not a directory: $p"
   (cd "$p" && pwd -P)
@@ -273,7 +273,7 @@ DOCKER_ARGS=(
   run --rm
   --read-only
   --init
-  --tmpfs /tmp:rw,nosuid,nodev
+  --tmpfs "/tmp:rw,nosuid,nodev"
   --mount "$mount_spec"
   --workdir /workspace
   --user "${uid}:${gid}"
