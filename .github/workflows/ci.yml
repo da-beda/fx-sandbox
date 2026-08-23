@@ -19,7 +19,7 @@ jobs:
       - name: YAML syntax/style
         run: >-
           yamllint -d '{extends: relaxed, rules: {line-length: disable, truthy: disable}}'
-          .github/workflows/*.yml examples/docker-compose.yml
+          .github/dependabot.yml .github/workflows/*.yml examples/docker-compose.yml
 
   shell:
     timeout-minutes: 10
