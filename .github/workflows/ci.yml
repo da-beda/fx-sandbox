@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: ShellCheck
         run: shellcheck --severity=warning fxs install.sh setup-fx.sh tests/*.sh
       - name: YAML syntax/style
@@ -28,7 +28,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Syntax
         run: bash -n fxs install.sh setup-fx.sh tests/*.sh
       - name: Tests
@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build/refresh reference image through fxs
         env:
           FXS_IMAGE: fxs-ci
@@ -60,7 +60,7 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Retained gateway tests
         run: python3 extras/gateway/test_gateway.py
       - name: Retained UI tests
