@@ -20,7 +20,7 @@ version forever, or that a Linux container is identical to the host OS.
 3. **No model policy.** If `FX_MODEL` is unset, fx resolves its own model exactly as upstream defines it.
 4. **No agent-loop policy.** Step count, context and tool-result retention stay at upstream fx defaults unless the user explicitly overrides them.
 5. **One deliberate permission override.** `fxs` defaults `FX_PERMISSION_MODE=yolo` because Docker is the authority boundary. `--ask` and `--auto` are explicit alternatives.
-6. **The image is the update unit.** The root filesystem is read-only, so `fxs` forces `FX_AUTO_UPGRADE=0`. An unpinned `fxs --build-image` resolves fx's current stable release on the host, refreshes the configured base-image manifest, and passes the exact fx version into the Docker build. Explicit `--fx-version` pins bypass the latest-fx lookup.
+6. **The image is the update unit.** The root filesystem is read-only, so `fxs` forces `FX_AUTO_UPGRADE=0` and blocks `fxs upgrade`. An unpinned `fxs --build-image` resolves fx's current stable release, pulls the configured base-image manifest, refreshes the OS-package cache at least once per UTC day, and passes exact cache-visible inputs into Docker. Explicit `--fx-version` pins bypass only the latest-fx lookup.
 7. **Upstream process controls pass through.** Exported `FX_*` controls are forwarded generically instead of being maintained as a semantic allowlist. Wrapper-owned controls are the explicit exceptions.
 8. **One host project tree.** The selected workspace is the only host project tree exposed by default.
 9. **Isolated state.** Each workspace gets its own private fxs home outside the project tree.
@@ -68,30 +68,46 @@ fx --version
 fxs -- --version
 ```
 
-Refresh the reference image to the current stable upstream fx release and current
-base-image manifest:
+Refresh the reference image with:
 
 ```bash
 fxs --build-image
 ```
 
-For an unpinned refresh, `fxs` first resolves `https://releases.fx.sh/latest.txt`
-on the host, then passes the exact result as `FX_VERSION=<version>` to the Docker
-build. The Dockerfile keeps OS dependencies and fx installation in separate
-layers: a new fx release invalidates the fx layer, while a changed base-image
-digest invalidates the OS layer.
+The supported build path has three independent freshness inputs:
 
-To pin the **fx version**, build with:
+```text
+base-image digest      -> base filesystem freshness
+FXS_OS_REFRESH         -> OS/apt package cache freshness
+FX_VERSION             -> fx release freshness
+```
+
+`docker build --pull` checks the base-image manifest. If `FXS_OS_REFRESH` is
+unset, fxs derives the current UTC date (`YYYY-MM-DD`) and passes it as a build
+argument before the apt layer, so a user-triggered rebuild after a new UTC day
+refreshes package indexes/packages even when the Ubuntu base digest did not
+change. `FX_VERSION` is declared only after that OS layer, so an fx-only update
+can still reuse freshly built OS dependencies.
+
+For an unpinned refresh, `fxs` resolves `https://releases.fx.sh/latest.txt` on
+the host and passes that exact result as `FX_VERSION=<version>`. To pin only the
+**fx version**, build with:
 
 ```bash
 fxs --build-image --fx-version <version>
 ```
 
-Explicit pins do not query the latest-fx pointer, but this is not a promise of
-bit-for-bit image reproducibility. The Ubuntu base tag, distribution packages and
-canonical installer remain external inputs unless separately pinned. For a
-published release, the signed image digest is the immutable artifact identity;
-`UPSTREAM_FX_VERSION` records which fx release was embedded.
+An explicit fx pin bypasses the latest-fx lookup but does not disable the normal
+base/OS freshness behavior. `FXS_OS_REFRESH` exists as an advanced cache-control
+override; normal users should not need to set it. Tagged release builds use the
+workflow run ID as the OS refresh token so each release refreshes package inputs
+regardless of prior builder cache.
+
+None of this is a promise of bit-for-bit local image reproducibility. The Ubuntu
+base tag, distribution package repositories and canonical upstream installer are
+still external inputs. For a published release, the signed image digest is the
+immutable artifact identity; `UPSTREAM_FX_VERSION` records which fx release was
+embedded.
 
 ## Optional siblings
 
