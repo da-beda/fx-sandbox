@@ -31,6 +31,17 @@ fx_line="$(grep -n 'FX_INSTALL_DIR=/usr/local/bin' "$ROOT/Dockerfile" | head -n 
 grep -Fq 'FX_VERSION is required; use: fxs --build-image' "$ROOT/Dockerfile" \
   || fail "reference image must reject ambiguous raw latest builds"
 
+# Image refreshes must never use the installed fxs data/state directory as
+# Docker build context. The runtime prepares a one-file temporary context, and
+# the repository itself denies context contents by default as defense in depth.
+grep -Fq 'fxs-build.XXXXXX' "$ROOT/fxs" \
+  || fail "isolated Docker build context is missing"
+grep -Fq 'cp "$DOCKERFILE" "$build_context/Dockerfile"' "$ROOT/fxs" \
+  || fail "reference Dockerfile is not copied into isolated build context"
+first_context_rule="$(grep -vE '^[[:space:]]*(#|$)' "$ROOT/.dockerignore" | head -n 1)"
+[[ "$first_context_rule" == '**' ]] || fail ".dockerignore must deny context by default"
+grep -Fxq '!Dockerfile' "$ROOT/.dockerignore" || fail "Dockerfile allow-rule missing from .dockerignore"
+
 # Post-refactor docs/examples must describe the actual boundary rather than the
 # retired web/installer architecture.
 grep -Fq '**/__pycache__/' "$ROOT/.gitignore" || fail "generic Python cache ignore missing"
@@ -39,6 +50,8 @@ if grep -Fq 'web/__pycache__/' "$ROOT/.gitignore"; then
 fi
 grep -Fq 'does not imply host or LAN isolation' "$ROOT/docs/THREAT_MODEL.md" \
   || fail "network-boundary nuance missing from threat model"
+grep -Fq 'build context' "$ROOT/docs/THREAT_MODEL.md" \
+  || fail "Docker build-context boundary is not documented"
 if grep -Fq 'v0.2.0' "$ROOT/README.md"; then
   fail "README still references nonexistent v0.2.0 tag"
 fi
@@ -59,6 +72,8 @@ grep -Fq 'python3 extras/gateway/test_gateway.py' "$ROOT/.github/workflows/ci.ym
   || fail "gateway extras are not exercised in CI"
 grep -Fq 'python3 extras/ui/test_server.py' "$ROOT/.github/workflows/ci.yml" \
   || fail "UI extras are not exercised in CI"
+grep -Fq 'shellcheck --severity=warning' "$ROOT/.github/workflows/ci.yml" \
+  || fail "shell lint is not exercised in CI"
 grep -Fq 'UPSTREAM_FX_VERSION' "$ROOT/.github/workflows/release-image.yml" \
   || fail "release does not record embedded fx version"
 [[ -f "$ROOT/.github/workflows/upstream-canary.yml" ]] \
