@@ -20,6 +20,14 @@ class BodyLimitError(ValueError):
     pass
 
 
+class InvalidContentLength(BodyLimitError):
+    pass
+
+
+class RequestBodyTooLarge(BodyLimitError):
+    pass
+
+
 def _declared_length(resp: Any) -> int | None:
     headers = getattr(resp, "headers", None)
     if headers is None:
@@ -71,11 +79,11 @@ def parse_content_length(raw: Any, maximum: int = GATEWAY_REQUEST_BYTES) -> int:
     try:
         value = int(raw)
     except (TypeError, ValueError) as exc:
-        raise BodyLimitError("invalid Content-Length") from exc
+        raise InvalidContentLength("invalid Content-Length") from exc
     if value < 0:
-        raise BodyLimitError("invalid Content-Length")
+        raise InvalidContentLength("invalid Content-Length")
     if value > maximum:
-        raise BodyLimitError(
+        raise RequestBodyTooLarge(
             f"Gateway request exceeds local safety limit ({maximum} bytes)"
         )
     return value
