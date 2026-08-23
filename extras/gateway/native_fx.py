@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Probe installed fx capabilities without relying on version numbers.
+"""Probe installed fx OpenAI-compatible capabilities without version guessing.
 
-The handoff decision is behavioral: when requested, run the installed fx against
+The handoff decision is behavioral. When requested, run the installed fx against
 an ephemeral loopback OpenAI-compatible server and observe whether it actually
-uses Chat Completions and/or Responses successfully. No provider credentials or
+uses Chat Completions and/or Responses successfully.
+
+Two upstream configuration contracts are currently under active development:
+
+* ``fx_openai`` — OPENAI_API_KEY + FX_OPENAI_BASE_URL + FX_OPENAI_API_STYLE
+* ``custom_endpoint`` — FX_API_KEY + FX_BASE_URL (Chat Completions)
+
+The probe tests those contracts independently so whichever upstream design lands
+can be detected without changing the adapter first. No provider credentials or
 external model traffic are involved.
 """
 from __future__ import annotations
@@ -24,6 +32,11 @@ PROBE_MODEL = "fxs-native-probe-model"
 CHAT_MARKER = "FXS_NATIVE_OPENAI_CHAT_OK"
 RESPONSES_MARKER = "FXS_NATIVE_OPENAI_RESPONSES_OK"
 
+CONTRACT_FX_OPENAI = "fx_openai"
+CONTRACT_CUSTOM_ENDPOINT = "custom_endpoint"
+CHAT_CONTRACTS = (CONTRACT_FX_OPENAI, CONTRACT_CUSTOM_ENDPOINT)
+RESPONSES_CONTRACTS = (CONTRACT_FX_OPENAI,)
+
 
 @dataclass(frozen=True)
 class NativeFxCapabilities:
@@ -33,6 +46,8 @@ class NativeFxCapabilities:
     openai_compatible: bool = False
     openai_chat: bool = False
     openai_responses: bool = False
+    openai_chat_contracts: tuple[str, ...] = ()
+    openai_responses_contracts: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
 
     def supports(self, api_style: str) -> bool:
@@ -43,8 +58,18 @@ class NativeFxCapabilities:
             return self.openai_chat
         return False
 
+    def contracts_for(self, api_style: str) -> tuple[str, ...]:
+        style = (api_style or "chat").strip().lower()
+        if style == "responses":
+            return self.openai_responses_contracts
+        if style in ("chat", "completions", "chat-completions", "chat_completions"):
+            return self.openai_chat_contracts
+        return ()
+
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
+        out["openai_chat_contracts"] = list(self.openai_chat_contracts)
+        out["openai_responses_contracts"] = list(self.openai_responses_contracts)
         out["evidence"] = list(self.evidence)
         return out
 
@@ -169,8 +194,63 @@ class _ProbeServer(ThreadingHTTPServer):
         self.state: dict[str, Any] = {}
 
 
-def _probe_transport(fx: str, api_style: str, timeout: int = 20) -> tuple[bool, str]:
+def _clean_probe_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in (
+        "AI_GATEWAY_API_KEY",
+        "VERCEL_AI_GATEWAY_API_KEY",
+        "VERCEL_OIDC_TOKEN",
+        "FX_GATEWAY_BASE_URL",
+        "FX_GATEWAY_CHAT_URL",
+        "FX_UPSTREAM",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_KEY",
+        "FX_OPENAI_BASE_URL",
+        "FX_OPENAI_API_STYLE",
+        "FX_BASE_URL",
+        "FX_API_KEY",
+        "OPENROUTER_API_KEY",
+        "XAI_API_KEY",
+    ):
+        env.pop(key, None)
+    return env
+
+
+def _apply_contract_environment(
+    env: dict[str, str],
+    contract: str,
+    *,
+    base_url: str,
+    api_style: str,
+) -> None:
+    if contract == CONTRACT_FX_OPENAI:
+        env.update({
+            "OPENAI_API_KEY": "fxs-native-probe-key",
+            "FX_OPENAI_BASE_URL": base_url,
+            "FX_OPENAI_API_STYLE": api_style,
+        })
+        return
+    if contract == CONTRACT_CUSTOM_ENDPOINT:
+        if api_style != "chat":
+            raise ValueError("custom_endpoint contract currently declares Chat only")
+        env.update({
+            "FX_API_KEY": "fxs-native-probe-key",
+            "FX_BASE_URL": base_url,
+        })
+        return
+    raise ValueError(f"unknown native fx probe contract: {contract}")
+
+
+def _probe_transport(
+    fx: str,
+    api_style: str,
+    contract: str,
+    timeout: int = 20,
+) -> tuple[bool, str]:
     style = "responses" if api_style == "responses" else "chat"
+    if style == "responses" and contract not in RESPONSES_CONTRACTS:
+        return False, f"{contract} does not declare a Responses wire"
+
     expected_path = "/v1/responses" if style == "responses" else "/v1/chat/completions"
     marker = RESPONSES_MARKER if style == "responses" else CHAT_MARKER
 
@@ -186,31 +266,22 @@ def _probe_transport(fx: str, api_style: str, timeout: int = 20) -> tuple[bool, 
             workspace.mkdir()
             (workspace / "README.md").write_text("fx native transport probe\n", encoding="utf-8")
 
-            env = os.environ.copy()
-            for key in (
-                "AI_GATEWAY_API_KEY",
-                "VERCEL_AI_GATEWAY_API_KEY",
-                "VERCEL_OIDC_TOKEN",
-                "FX_GATEWAY_BASE_URL",
-                "FX_GATEWAY_CHAT_URL",
-                "FX_UPSTREAM",
-                "OPENAI_BASE_URL",
-                "OPENROUTER_API_KEY",
-                "XAI_API_KEY",
-            ):
-                env.pop(key, None)
+            env = _clean_probe_environment()
             env.update({
                 "HOME": str(home),
-                "OPENAI_API_KEY": "fxs-native-probe-key",
-                "FX_OPENAI_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
-                "FX_OPENAI_API_STYLE": style,
                 "FX_MODEL": PROBE_MODEL,
-                # If an older fx ignores the OpenAI-compatible contract, keep
-                # any legacy Gateway attempt local and fast instead of allowing
-                # the capability probe to contact a real provider.
+                # If an older fx ignores the tested OpenAI-compatible contract,
+                # keep any legacy Gateway attempt local and fast instead of
+                # allowing the capability probe to contact a real provider.
                 "FX_GATEWAY_BASE_URL": "http://127.0.0.1:1",
                 "FX_GATEWAY_CHAT_URL": "http://127.0.0.1:1/v3/ai/language-model",
             })
+            _apply_contract_environment(
+                env,
+                contract,
+                base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                api_style=style,
+            )
             rc, output = _run(
                 [
                     fx,
@@ -229,8 +300,8 @@ def _probe_transport(fx: str, api_style: str, timeout: int = 20) -> tuple[bool, 
         reached = expected_path in paths
         parsed = marker in output
         if rc == 0 and reached and parsed:
-            return True, f"native OpenAI {style} loopback probe passed"
-        reason = f"native OpenAI {style} loopback probe failed"
+            return True, f"native OpenAI {style} loopback probe passed via {contract}"
+        reason = f"native OpenAI {style} loopback probe failed via {contract}"
         if reached and not parsed:
             reason += " (transport reached, response not accepted)"
         elif not reached:
@@ -261,24 +332,32 @@ def probe_fx(
     if not transport_probe:
         return NativeFxCapabilities(available=True, version=version)
 
-    chat, chat_evidence = _probe_transport(fx, "chat", timeout=timeout)
-    responses, responses_evidence = _probe_transport(fx, "responses", timeout=timeout)
-    evidence = tuple(
-        item
-        for supported, item in (
-            (chat, chat_evidence),
-            (responses, responses_evidence),
-        )
-        if supported
-    )
+    chat_contracts: list[str] = []
+    responses_contracts: list[str] = []
+    evidence: list[str] = []
+
+    for contract in CHAT_CONTRACTS:
+        supported, detail = _probe_transport(fx, "chat", contract, timeout=timeout)
+        if supported:
+            chat_contracts.append(contract)
+            evidence.append(detail)
+
+    for contract in RESPONSES_CONTRACTS:
+        supported, detail = _probe_transport(fx, "responses", contract, timeout=timeout)
+        if supported:
+            responses_contracts.append(contract)
+            evidence.append(detail)
+
     return NativeFxCapabilities(
         available=True,
         version=version,
         transport_probed=True,
-        openai_compatible=chat or responses,
-        openai_chat=chat,
-        openai_responses=responses,
-        evidence=evidence,
+        openai_compatible=bool(chat_contracts or responses_contracts),
+        openai_chat=bool(chat_contracts),
+        openai_responses=bool(responses_contracts),
+        openai_chat_contracts=tuple(chat_contracts),
+        openai_responses_contracts=tuple(responses_contracts),
+        evidence=tuple(evidence),
     )
 
 
@@ -289,9 +368,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--probe-transport",
         action="store_true",
-        help="exercise Chat Completions and Responses against an ephemeral loopback server",
+        help="exercise known native OpenAI-compatible contracts against an ephemeral loopback server",
     )
-    parser.add_argument("--timeout", type=int, default=20, help="per-transport probe timeout in seconds")
+    parser.add_argument("--timeout", type=int, default=20, help="per-contract transport probe timeout in seconds")
     args = parser.parse_args(argv)
 
     result = probe_fx(
@@ -306,7 +385,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"transport probed: {'yes' if result.transport_probed else 'no'}")
         print(f"openai-compatible: {'yes' if result.openai_compatible else 'no'}")
         print(f"chat: {'yes' if result.openai_chat else 'no'}")
+        print(f"chat contracts: {', '.join(result.openai_chat_contracts) or 'none'}")
         print(f"responses: {'yes' if result.openai_responses else 'no'}")
+        print(f"responses contracts: {', '.join(result.openai_responses_contracts) or 'none'}")
         for item in result.evidence:
             print(f"- {item}")
     return 0 if result.available else 1
