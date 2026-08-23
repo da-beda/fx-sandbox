@@ -170,6 +170,23 @@ class SSE(unittest.TestCase):
         self.assertEqual(json.loads(got[2])["finishReason"]["unified"], "stop")
         self.assertEqual(json.loads(got[2])["usage"]["inputTokens"]["total"], 3)
 
+    def test_bare_eof_after_partial_chat_is_error(self):
+        s = gateway.Stream()
+        got = s.consume(b'{"choices":[{"delta":{"content":"partial"}}]}')
+        got += s.close()
+        parsed = [json.loads(e) for e in got]
+        self.assertEqual([e["type"] for e in parsed], ["text-delta", "error", "finish"])
+        self.assertIn("terminal event", str(parsed[1].get("error") or ""))
+        self.assertEqual(parsed[2]["finishReason"]["unified"], "error")
+
+    def test_done_sentinel_can_close_without_finish_chunk(self):
+        s = gateway.Stream()
+        got = s.consume(b'{"choices":[{"delta":{"content":"complete"}}]}')
+        got += s.close(terminal=True)
+        parsed = [json.loads(e) for e in got]
+        self.assertEqual([e["type"] for e in parsed], ["text-delta", "finish"])
+        self.assertEqual(parsed[1]["finishReason"]["unified"], "stop")
+
     def test_tool_call_fragments(self):
         s = gateway.Stream()
         chunks = [
@@ -1335,6 +1352,15 @@ class ResponseSSE(unittest.TestCase):
         self.assertEqual(json.loads(got[0])["delta"], "Hel")
         self.assertEqual(json.loads(got[2])["finishReason"]["unified"], "stop")
         self.assertEqual(json.loads(got[2])["usage"]["inputTokens"]["total"], 3)
+
+    def test_bare_eof_after_partial_responses_stream_is_error(self):
+        s = gateway.ResponseStream()
+        got = s.consume(b'{"type":"response.output_text.delta","delta":"partial"}')
+        got += s.close()
+        parsed = [json.loads(e) for e in got]
+        self.assertEqual([e["type"] for e in parsed], ["text-delta", "error", "finish"])
+        self.assertIn("terminal event", str(parsed[1].get("error") or ""))
+        self.assertEqual(parsed[2]["finishReason"]["unified"], "error")
 
     def test_tool_call_deltas(self):
         s = gateway.ResponseStream()
