@@ -20,14 +20,16 @@ grep -Fq 'FX_*)' "$ROOT/fxs" \
 grep -Fq -- 'docker build --pull' "$ROOT/fxs" \
   || fail "explicit image refresh must pull the current base manifest"
 
-# FX_VERSION must not invalidate the OS dependency layer. Keep the ARG after the
-# apt layer and before the canonical fx install layer.
+# FX_VERSION must not invalidate the OS dependency layer. Keep the required ARG
+# after the apt layer and before the canonical fx install layer.
 apt_line="$(grep -n 'apt-get update -qq' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
-arg_line="$(grep -n '^ARG FX_VERSION=' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
+arg_line="$(grep -nE '^ARG FX_VERSION(=|$)' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
 fx_line="$(grep -n 'FX_INSTALL_DIR=/usr/local/bin' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
 [[ -n "$apt_line" && -n "$arg_line" && -n "$fx_line" ]] || fail "Dockerfile cache-layer markers missing"
 [[ "$apt_line" -lt "$arg_line" && "$arg_line" -lt "$fx_line" ]] \
   || fail "FX_VERSION must only affect the fx-install layer"
+grep -Fq 'FX_VERSION is required; use: fxs --build-image' "$ROOT/Dockerfile" \
+  || fail "reference image must reject ambiguous raw latest builds"
 
 # Post-refactor docs/examples must describe the actual boundary rather than the
 # retired web/installer architecture.
