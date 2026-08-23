@@ -34,6 +34,8 @@ jobs:
         run: python3 extras/gateway/test_gateway.py
       - name: Gateway search policy tests
         run: python3 extras/gateway/test_search_policy.py
+      - name: Search HTTP limit tests
+        run: python3 extras/gateway/test_search_http_limits.py
       - name: Responses fidelity tests
         run: python3 extras/gateway/test_responses_fidelity.py
       - name: Named tool-choice fidelity tests
