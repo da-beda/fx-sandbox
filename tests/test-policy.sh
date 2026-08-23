@@ -21,17 +21,24 @@ grep -Fq -- 'docker build --pull' "$ROOT/fxs" \
   || fail "explicit image refresh must pull the current base manifest"
 grep -Fq 'fx cannot self-upgrade inside fxs' "$ROOT/fxs" \
   || fail "explicit fx upgrade boundary guidance missing"
+grep -Fq 'FXS_OS_REFRESH' "$ROOT/fxs" \
+  || fail "OS package refresh cache key missing from fxs"
 
-# FX_VERSION must not invalidate the OS dependency layer. Keep the required ARG
-# after the apt layer and before the canonical fx install layer.
+# OS package freshness and fx freshness are independent cache axes. The OS token
+# must affect the apt layer, while FX_VERSION must be declared only afterwards so
+# an fx-only release does not unnecessarily invalidate OS dependencies.
+os_arg_line="$(grep -nE '^ARG FXS_OS_REFRESH(=|$)' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
 apt_line="$(grep -n 'apt-get update -qq' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
-arg_line="$(grep -nE '^ARG FX_VERSION(=|$)' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
+fx_arg_line="$(grep -nE '^ARG FX_VERSION(=|$)' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
 fx_line="$(grep -n 'FX_INSTALL_DIR=/usr/local/bin' "$ROOT/Dockerfile" | head -n 1 | cut -d: -f1)"
-[[ -n "$apt_line" && -n "$arg_line" && -n "$fx_line" ]] || fail "Dockerfile cache-layer markers missing"
-[[ "$apt_line" -lt "$arg_line" && "$arg_line" -lt "$fx_line" ]] \
-  || fail "FX_VERSION must only affect the fx-install layer"
+[[ -n "$os_arg_line" && -n "$apt_line" && -n "$fx_arg_line" && -n "$fx_line" ]] \
+  || fail "Dockerfile cache-layer markers missing"
+[[ "$os_arg_line" -lt "$apt_line" && "$apt_line" -lt "$fx_arg_line" && "$fx_arg_line" -lt "$fx_line" ]] \
+  || fail "OS and fx cache keys are not isolated to their intended layers"
+grep -Fq 'FXS_OS_REFRESH is required; use: fxs --build-image' "$ROOT/Dockerfile" \
+  || fail "reference image must require a cache-visible OS refresh token"
 grep -Fq 'FX_VERSION is required; use: fxs --build-image' "$ROOT/Dockerfile" \
-  || fail "reference image must reject ambiguous raw latest builds"
+  || fail "reference image must reject ambiguous raw latest fx builds"
 
 # Image refreshes must never use the installed fxs data/state directory as
 # Docker build context. The runtime prepares a one-file temporary context, and
@@ -83,6 +90,8 @@ grep -Fq -- '--platform linux/arm64' "$ROOT/.github/workflows/ci.yml" \
   || fail "arm64 reference-image smoke test is missing from CI"
 grep -Fq 'UPSTREAM_FX_VERSION' "$ROOT/.github/workflows/release-image.yml" \
   || fail "release does not record embedded fx version"
+grep -Fq 'FXS_OS_REFRESH=${{ github.run_id }}' "$ROOT/.github/workflows/release-image.yml" \
+  || fail "release must refresh OS package layer independently of fx"
 [[ -f "$ROOT/.github/workflows/upstream-canary.yml" ]] \
   || fail "upstream compatibility canary missing"
 
