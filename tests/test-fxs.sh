@@ -58,9 +58,8 @@ assert_has "$out" "FX_AUTO_UPGRADE=0"
 assert_not_has "$out" "FX_AUTO_UPGRADE=1"
 
 # An unpinned image refresh resolves the current stable fx version on the host
-# and passes that exact value as a Docker build arg. This makes the upstream fx
-# version part of Docker's cache key instead of hiding a new release behind a
-# cached RUN layer. Explicit pins must bypass the latest-version lookup.
+# and passes that exact value as a Docker build arg. The build also pulls the
+# current base-image manifest. Explicit pins bypass latest-version resolution.
 mkdir -p "$TMP/buildbin"
 cat > "$TMP/buildbin/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
@@ -86,6 +85,7 @@ PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
   FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
   "$FXS" --build-image >/dev/null
 build_out="$(cat "$TMP/build.log")"
+assert_has "$build_out" "--pull"
 assert_has "$build_out" "--build-arg"
 assert_has "$build_out" "FX_VERSION=0.0.99"
 curl_out="$(cat "$TMP/curl.log")"
@@ -97,9 +97,25 @@ PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
   FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
   "$FXS" --build-image --fx-version 9.9.9 >/dev/null
 build_out="$(cat "$TMP/build.log")"
+assert_has "$build_out" "--pull"
 assert_has "$build_out" "FX_VERSION=9.9.9"
 curl_after="$(cat "$TMP/curl.log")"
 [[ "$curl_after" == "$curl_before" ]] || fail "pinned build unexpectedly resolved latest fx"
+
+# Explicit versions are untrusted CLI input and must not become arbitrary Docker
+# build-arg content. Invalid pins fail before docker build and before any latest
+# release lookup.
+: > "$TMP/build.log"
+curl_before="$curl_after"
+if PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
+  FXS_BUILD_LOG="$TMP/build.log" FXS_CURL_LOG="$TMP/curl.log" \
+  FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
+  "$FXS" --build-image --fx-version 'bad/value' >/dev/null 2>&1; then
+  fail "invalid fx version was accepted"
+fi
+[[ ! -s "$TMP/build.log" ]] || fail "invalid fx version reached docker build"
+curl_after="$(cat "$TMP/curl.log")"
+[[ "$curl_after" == "$curl_before" ]] || fail "invalid pinned build unexpectedly resolved latest fx"
 
 out="$(HOME="$TMP/home" "$FXS" --dry-run -w "$TMP/project" --ask --host-gateway --memory 4g --cpus 6 --pids 512)"
 assert_has "$out" "FX_PERMISSION_MODE=ask"
