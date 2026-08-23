@@ -32,11 +32,11 @@ The default network is Docker `bridge`, because fx normally needs outbound infer
 
 The image filesystem is read-only, so fx cannot safely replace its own executable in place. fxs therefore forces `FX_AUTO_UPGRADE=0` and treats the image as the update unit. The explicit upstream `fx upgrade` command is incompatible for the same reason, so `fxs upgrade` is blocked with guidance to use `fxs --build-image` instead.
 
-An unpinned `fxs --build-image` resolves the current stable fx version on the host, refreshes the base-image manifest, and passes the exact fx version into Docker as a build argument. A new fx release therefore invalidates the fx-install cache layer; a changed Ubuntu base digest invalidates the OS dependency layer. Explicit `--fx-version` pins the fx version and bypasses the latest-version lookup.
+An unpinned `fxs --build-image` has three independent freshness inputs. `docker build --pull` refreshes the configured base-image manifest. `FXS_OS_REFRESH` invalidates the OS/apt layer; when unset, fxs supplies the current UTC date so a rebuild on a new day refreshes distribution package indexes and packages even if the Ubuntu base digest has not changed. `FX_VERSION` invalidates only the later fx-install layer. Explicit `--fx-version` pins the fx version and bypasses the latest-fx lookup without suppressing the normal base/OS refresh behavior.
 
 The reference Docker build context is deliberately isolated from persistent fxs data. The installed Dockerfile normally lives under `~/.local/share/fxs`, next to the default `state/` tree, but `fxs --build-image` copies only that Dockerfile into a fresh temporary directory and uses the temporary directory as Docker's build context. The temporary context is removed after the build. This prevents session/auth/state files from being sent to the Docker daemon or a remote builder merely because they share a parent directory with the installed Dockerfile. The repository `.dockerignore` also denies context contents by default as defense in depth.
 
-Pinning `FX_VERSION` is **not** a promise of bit-for-bit image reproducibility: the Ubuntu base tag, distribution packages and upstream canonical installer are still external inputs unless separately pinned. A published image digest is the immutable identity for a released image.
+Pinning `FX_VERSION` is **not** a promise of bit-for-bit image reproducibility: the Ubuntu base tag, distribution packages and upstream canonical installer are still external inputs unless separately pinned. `FXS_OS_REFRESH` is a cache invalidation token, not an artifact identity. A published image digest is the immutable identity for a released image.
 
 This means native fx and sandboxed fx are not guaranteed to be the same version unless the operator keeps them aligned. That is a version-management property, not a fork of the agent loop.
 
@@ -45,6 +45,8 @@ This means native fx and sandboxed fx are not guaranteed to be the same version 
 fxs intentionally consumes the unmodified upstream fx release through fx's canonical `https://fx.sh/setup.sh` installer. Upstream documents that its installer downloads release archives over HTTPS but does not verify an independently published signature or checksum. Therefore the upstream installer/CDN path is a trusted build input for fxs; so are the configured container registry/base image and distribution package repositories.
 
 A signed fxs release attests the immutable **resulting fxs image digest** and the release artifacts produced by this repository. `UPSTREAM_FX_VERSION` records which fx version the release workflow requested. Those signatures do not constitute independent cryptographic verification of the upstream fx archive before it entered the build. Rebuilding fx from source or inventing a parallel fx distribution/verification scheme would materially expand fxs beyond its containment-wrapper role and is not done here.
+
+GitHub Actions used by CI/release workflows are pinned to immutable commit SHAs. Dependabot is configured to propose GitHub Actions updates so those pins can move deliberately rather than reverting to mutable major-version tags.
 
 ## Custom images
 
