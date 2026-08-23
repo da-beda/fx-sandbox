@@ -30,7 +30,7 @@ The default network is Docker `bridge`, because fx normally needs outbound infer
 
 ## Image and upgrade boundary
 
-The image filesystem is read-only, so fx cannot safely replace its own executable in place. fxs therefore forces `FX_AUTO_UPGRADE=0` and treats the image as the update unit.
+The image filesystem is read-only, so fx cannot safely replace its own executable in place. fxs therefore forces `FX_AUTO_UPGRADE=0` and treats the image as the update unit. The explicit upstream `fx upgrade` command is incompatible for the same reason, so `fxs upgrade` is blocked with guidance to use `fxs --build-image` instead.
 
 An unpinned `fxs --build-image` resolves the current stable fx version on the host, refreshes the base-image manifest, and passes the exact fx version into Docker as a build argument. A new fx release therefore invalidates the fx-install cache layer; a changed Ubuntu base digest invalidates the OS dependency layer. Explicit `--fx-version` pins the fx version and bypasses the latest-version lookup.
 
@@ -39,6 +39,12 @@ The reference Docker build context is deliberately isolated from persistent fxs 
 Pinning `FX_VERSION` is **not** a promise of bit-for-bit image reproducibility: the Ubuntu base tag, distribution packages and upstream canonical installer are still external inputs unless separately pinned. A published image digest is the immutable identity for a released image.
 
 This means native fx and sandboxed fx are not guaranteed to be the same version unless the operator keeps them aligned. That is a version-management property, not a fork of the agent loop.
+
+## Supply-chain boundary
+
+fxs intentionally consumes the unmodified upstream fx release through fx's canonical `https://fx.sh/setup.sh` installer. Upstream documents that its installer downloads release archives over HTTPS but does not verify an independently published signature or checksum. Therefore the upstream installer/CDN path is a trusted build input for fxs; so are the configured container registry/base image and distribution package repositories.
+
+A signed fxs release attests the immutable **resulting fxs image digest** and the release artifacts produced by this repository. `UPSTREAM_FX_VERSION` records which fx version the release workflow requested. Those signatures do not constitute independent cryptographic verification of the upstream fx archive before it entered the build. Rebuilding fx from source or inventing a parallel fx distribution/verification scheme would materially expand fxs beyond its containment-wrapper role and is not done here.
 
 ## Custom images
 
