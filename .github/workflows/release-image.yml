@@ -57,6 +57,7 @@ jobs:
           push: true
           pull: true
           build-args: |
+            FXS_OS_REFRESH=${{ github.run_id }}
             FX_VERSION=${{ steps.fx.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
