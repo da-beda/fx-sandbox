@@ -224,10 +224,30 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
   else
     validate_fx_version "$FX_VERSION"
   fi
-  build=(docker build --pull --tag "$IMAGE" --file "$DOCKERFILE" --build-arg "FX_VERSION=$FX_VERSION")
-  build+=("$(dirname "$DOCKERFILE")")
+
+  # The installed reference Dockerfile normally lives beside fxs state under
+  # ~/.local/share/fxs. Never use that directory as Docker build context: even
+  # unused context files are sent to the Docker daemon/builder. Build from a
+  # fresh one-file context so sessions/auth/state cannot cross that boundary.
+  build_context="$(mktemp -d "${TMPDIR:-/tmp}/fxs-build.XXXXXX")"
+  cleanup_build_context() { rm -rf "$build_context"; }
+  trap cleanup_build_context EXIT
+  cp "$DOCKERFILE" "$build_context/Dockerfile" \
+    || die "could not prepare isolated Docker build context"
+
+  build=(
+    docker build --pull
+    --tag "$IMAGE"
+    --file "$build_context/Dockerfile"
+    --build-arg "FX_VERSION=$FX_VERSION"
+    "$build_context"
+  )
   log "building $IMAGE with fx $FX_VERSION"
-  exec "${build[@]}"
+  status=0
+  "${build[@]}" || status=$?
+  trap - EXIT
+  cleanup_build_context
+  exit "$status"
 fi
 
 WORKSPACE="$(abs_dir "$WORKSPACE")"
