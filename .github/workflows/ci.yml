@@ -78,11 +78,13 @@ jobs:
       - name: Build and run arm64 reference image
         env:
           FX_VERSION: ${{ steps.fx.outputs.version }}
+          OS_REFRESH: ${{ github.run_id }}
         run: |
           set -euo pipefail
           docker buildx build \
             --pull \
             --platform linux/arm64 \
+            --build-arg "FXS_OS_REFRESH=$OS_REFRESH" \
             --build-arg "FX_VERSION=$FX_VERSION" \
             --tag fxs-arm64-ci \
             --load \
