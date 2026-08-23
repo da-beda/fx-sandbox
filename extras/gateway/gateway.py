@@ -42,6 +42,7 @@ import search_policy
 import responses_fidelity
 import tool_choice_fidelity
 import stream_cancel
+import stream_limits
 
 LISTEN_DEFAULT = os.environ.get("FXS_GATEWAY_LISTEN", "127.0.0.1:18787")
 USER_AGENT = "fxs-gateway/1"
@@ -1290,11 +1291,17 @@ def run_openrouter_search(query: str, max_results: int = 5) -> dict[str, Any]:
 
 
 class Stream:
-    def __init__(self, allowed_tools: Optional[list[str]] = None) -> None:
-        self.tools: dict[int, dict[str, Any]] = {}
-        self.order: list[int] = []
+    def __init__(
+        self,
+        allowed_tools: Optional[list[str]] = None,
+        *,
+        limits: Optional[stream_limits.StreamLimits] = None,
+    ) -> None:
+        self.tools: dict[Any, dict[str, Any]] = {}
+        self.order: list[Any] = []
         self.finished = False
         self.allowed_tools = list(allowed_tools or [])
+        self.limits = limits or stream_limits.DEFAULT_LIMITS
 
     def consume(self, data: bytes | str) -> list[bytes]:
         if isinstance(data, str):
@@ -1326,12 +1333,17 @@ class Stream:
             idx = int(call.get("index") or 0)
             acc = self._tool(idx)
             if call.get("id"):
-                acc["id"] = call["id"]
+                acc["id"] = stream_limits.require_identity(
+                    call["id"], self.limits, "tool call id"
+                )
             elif not acc["id"]:
                 acc["id"] = f"call_{idx}"
             fn = call.get("function") or {}
             if fn.get("name"):
-                acc["name"] = canonical_tool_name(fn["name"], self.allowed_tools)
+                canonical = canonical_tool_name(fn["name"], self.allowed_tools)
+                acc["name"] = stream_limits.require_identity(
+                    canonical, self.limits, "tool name"
+                )
             if not acc["started"] and acc["id"] and acc["name"]:
                 acc["started"] = True
                 events.append(_j({
@@ -1341,7 +1353,7 @@ class Stream:
                 }))
             args = fn.get("arguments") or ""
             if args:
-                acc["args"] += args
+                stream_limits.append_arguments(acc, args, self.limits)
                 if acc["started"]:
                     events.append(_j({
                         "type": "tool-input-delta",
@@ -1442,7 +1454,14 @@ class Stream:
     def _tool(self, index: int) -> dict[str, Any]:
         acc = self.tools.get(index)
         if acc is None:
-            acc = {"id": "", "name": "", "args": "", "started": False}
+            stream_limits.reserve_tool(len(self.order), self.limits)
+            acc = {
+                "id": "",
+                "name": "",
+                "args": "",
+                "_args_bytes": 0,
+                "started": False,
+            }
             self.tools[index] = acc
             self.order.append(index)
         return acc
@@ -1451,8 +1470,13 @@ class Stream:
 class ResponseStream(Stream):
     """OpenAI Responses SSE (`response.output_text.delta`, …) → Gateway events."""
 
-    def __init__(self, allowed_tools: Optional[list[str]] = None) -> None:
-        super().__init__(allowed_tools)
+    def __init__(
+        self,
+        allowed_tools: Optional[list[str]] = None,
+        *,
+        limits: Optional[stream_limits.StreamLimits] = None,
+    ) -> None:
+        super().__init__(allowed_tools, limits=limits)
         self.ids: dict[str, str] = {}  # item_id → call_id
 
     def consume(self, data: bytes | str) -> list[bytes]:
@@ -1499,7 +1523,7 @@ class ResponseStream(Stream):
             acc = self._acc_for(chunk)
             args = chunk.get("delta") or ""
             if args:
-                acc["args"] += args
+                stream_limits.append_arguments(acc, args, self.limits)
                 if acc["started"]:
                     events.append(_j({
                         "type": "tool-input-delta",
@@ -1510,8 +1534,8 @@ class ResponseStream(Stream):
         if t == "response.function_call_arguments.done":
             acc = self._acc_for(chunk)
             final = chunk.get("arguments")
-            if isinstance(final, str) and final and not acc["args"]:
-                acc["args"] = final
+            if final and not acc["args"]:
+                stream_limits.append_arguments(acc, final, self.limits)
             return events
         if t == "response.completed":
             resp = chunk.get("response") or {}
@@ -1547,17 +1571,28 @@ class ResponseStream(Stream):
     def _item_added(self, item: dict) -> list[bytes]:
         if (item or {}).get("type") != "function_call":
             return []
-        call_id = item.get("call_id") or item.get("id") or ""
-        item_id = item.get("id") or ""
+        raw_call_id = item.get("call_id") or item.get("id") or ""
+        raw_item_id = item.get("id") or ""
+        call_id = (
+            stream_limits.require_identity(raw_call_id, self.limits, "tool call id")
+            if raw_call_id else ""
+        )
+        item_id = (
+            stream_limits.require_identity(raw_item_id, self.limits, "provider item id")
+            if raw_item_id else ""
+        )
         if item_id and call_id:
             self.ids[item_id] = call_id
         acc = self._named(call_id or item_id)
         if call_id:
             acc["id"] = call_id
         if item.get("name"):
-            acc["name"] = canonical_tool_name(item["name"], self.allowed_tools)
+            canonical = canonical_tool_name(item["name"], self.allowed_tools)
+            acc["name"] = stream_limits.require_identity(
+                canonical, self.limits, "tool name"
+            )
         if item.get("arguments"):
-            acc["args"] += item["arguments"]
+            stream_limits.append_arguments(acc, item["arguments"], self.limits)
         events: list[bytes] = []
         if not acc["started"] and acc["id"] and acc["name"]:
             acc["started"] = True
@@ -1586,7 +1621,7 @@ class ResponseStream(Stream):
             acc = self.tools.get(self.ids.get(item_id, item_id))
         if acc and acc.get("started"):
             if item.get("arguments") and not acc["args"]:
-                acc["args"] = item["arguments"]
+                stream_limits.append_arguments(acc, item["arguments"], self.limits)
             return []
         return self._item_added(item)
 
@@ -1604,17 +1639,33 @@ class ResponseStream(Stream):
         return events
 
     def _acc_for(self, chunk: dict) -> dict[str, Any]:
-        item_id = chunk.get("item_id") or ""
-        call_id = chunk.get("call_id") or self.ids.get(item_id) or item_id
+        raw_item_id = chunk.get("item_id") or ""
+        item_id = (
+            stream_limits.require_identity(raw_item_id, self.limits, "provider item id")
+            if raw_item_id else ""
+        )
+        raw_call_id = chunk.get("call_id") or self.ids.get(item_id) or item_id
+        call_id = (
+            stream_limits.require_identity(raw_call_id, self.limits, "tool call id")
+            if raw_call_id else ""
+        )
         if item_id and call_id:
             self.ids[item_id] = call_id
         return self._named(call_id)
 
     def _named(self, key: str) -> dict[str, Any]:
         key = key or f"anon{len(self.order)}"
+        key = stream_limits.require_identity(key, self.limits, "tool call id")
         acc = self.tools.get(key)
         if acc is None:
-            acc = {"id": key, "name": "", "args": "", "started": False}
+            stream_limits.reserve_tool(len(self.order), self.limits)
+            acc = {
+                "id": key,
+                "name": "",
+                "args": "",
+                "_args_bytes": 0,
+                "started": False,
+            }
             self.tools[key] = acc
             self.order.append(key)
         if not acc["id"]:
@@ -1635,19 +1686,47 @@ def _sse_payload(event: str, buf: list[str]) -> str:
     return payload
 
 
-def read_sse_data(resp) -> Iterable[str]:
-    """Yield SSE data payloads. Prefer JSON `type`; fall back to `event:`."""
+def read_sse_data(
+    resp,
+    *,
+    limits: Optional[stream_limits.StreamLimits] = None,
+) -> Iterable[str]:
+    """Yield bounded SSE payloads. Prefer JSON `type`; fall back to `event:`."""
+    active = limits or stream_limits.DEFAULT_LIMITS
     buf: list[str] = []
     event = ""
+    aggregate_bytes = 0
+    event_count = 0
+
+    def reserve_event() -> None:
+        nonlocal event_count
+        event_count += 1
+        if event_count > active.sse_events:
+            raise stream_limits.StreamLimitError(
+                f"SSE event count exceeds local safety limit ({active.sse_events})"
+            )
+
     while True:
-        raw = resp.readline()
+        raw = resp.readline(active.sse_line_bytes + 1)
+        if len(raw) > active.sse_line_bytes:
+            raise stream_limits.StreamLimitError(
+                f"SSE line exceeds local safety limit ({active.sse_line_bytes} bytes)"
+            )
+        aggregate_bytes = stream_limits.checked_total(
+            aggregate_bytes,
+            len(raw),
+            active.sse_aggregate_bytes,
+            "SSE aggregate",
+        )
         if not raw:
             if buf:
+                reserve_event()
                 yield _sse_payload(event, buf)
             return
         line = raw.decode("utf-8", "replace").rstrip("\r\n")
         if line == "":
             if buf:
+                reserve_event()
                 yield _sse_payload(event, buf)
                 buf = []
             event = ""
