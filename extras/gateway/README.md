@@ -37,6 +37,12 @@ python3 extras/gateway/native_fx.py --json
 
 This gives the WebUI and future migration work a conservative rule: switch a provider path to native `fx` only after the installed binary itself proves the required wire and reports the contract needed to configure it. Until then, keep using the adapter. Native Chat support alone is also not enough to retire the adapter's Responses path.
 
+## Stream completion integrity
+
+A streaming provider must produce terminal evidence before the adapter commits a successful turn. Valid terminal evidence is a Chat Completions finish reason, a terminal Responses event, or an explicit SSE `[DONE]` sentinel.
+
+A bare transport EOF is **not** terminal evidence. If an upstream server emits partial text or tool arguments and then disconnects without one of the terminal conditions above, the adapter emits an error finish rather than manufacturing `stop`. This prevents a truncated local-model response from being recorded as a successful agent turn. `[DONE]` without a preceding finish chunk remains accepted for compatible servers that use the sentinel itself as the terminal marker.
+
 ## Vercel-backed search with another LLM provider
 
 The WebUI can retain a Vercel AI Gateway key for web search while the main model runs through OpenRouter, xAI, Ollama, or another OpenAI-compatible endpoint. That search path must not copy upstream `fx`'s current default model into this repository.
