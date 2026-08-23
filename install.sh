@@ -47,6 +47,18 @@ die()  { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'install.sh: warning: %s\n' "$*" >&2; }
 log()  { printf 'install.sh: %s\n' "$*" >&2; }
 
+curl_retry() {
+  curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 "$@"
+}
+
+validate_fx_version() {
+  local version="$1"
+  [[ -n "$version" ]] || die "fx version must not be empty"
+  case "$version" in
+    *[!0-9A-Za-z._+-]*) die "invalid fx version: $version" ;;
+  esac
+}
+
 set_target() {
   local next="$1"
   if [[ -n "$TARGET" && "$TARGET" != "$next" ]]; then
@@ -79,6 +91,8 @@ while [[ $# -gt 0 ]]; do
     *) die "unknown argument: $1" ;;
   esac
 done
+
+[[ -z "$FX_VERSION" ]] || validate_fx_version "$FX_VERSION"
 
 have_tty() { { : < /dev/tty; } 2>/dev/null; }
 
@@ -114,9 +128,9 @@ command -v curl >/dev/null 2>&1 || die "curl is required"
 install_native_fx() {
   log "native fx -> canonical https://fx.sh/setup.sh"
   if [[ -n "$FX_VERSION" ]]; then
-    curl -fsSL https://fx.sh/setup.sh | bash -s -- "$FX_VERSION"
+    curl_retry https://fx.sh/setup.sh | bash -s -- "$FX_VERSION"
   else
-    curl -fsSL https://fx.sh/setup.sh | bash
+    curl_retry https://fx.sh/setup.sh | bash
   fi
 }
 
@@ -134,19 +148,29 @@ fetch_or_copy() {
   if srcdir="$(local_source_dir 2>/dev/null)"; then
     cp "$srcdir/$rel" "$dest"
   else
-    curl -fsSL "${RAW_BASE}/${FXS_REF}/${rel}" -o "$dest"
+    curl_retry -o "$dest" "${RAW_BASE}/${FXS_REF}/${rel}"
   fi
 }
 
 install_fxs() {
   mkdir -p "$FXS_INSTALL_DIR" "$FXS_DATA_DIR"
-  local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/fxs.XXXXXX")"
-  fetch_or_copy fxs "$tmp"
-  install -m 0755 "$tmp" "$FXS_INSTALL_DIR/fxs"
-  fetch_or_copy Dockerfile "$FXS_DATA_DIR/Dockerfile"
-  chmod 0644 "$FXS_DATA_DIR/Dockerfile"
-  rm -f "$tmp"
+  local tmpdir
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/fxs-install.XXXXXX")"
+
+  # Fetch/copy the complete pair before replacing either installed file. A
+  # transient failure must not leave a new wrapper with an old/partial Dockerfile.
+  if ! fetch_or_copy fxs "$tmpdir/fxs"; then
+    rm -rf "$tmpdir"
+    die "could not obtain fxs"
+  fi
+  if ! fetch_or_copy Dockerfile "$tmpdir/Dockerfile"; then
+    rm -rf "$tmpdir"
+    die "could not obtain the reference Dockerfile"
+  fi
+
+  install -m 0755 "$tmpdir/fxs" "$FXS_INSTALL_DIR/fxs"
+  install -m 0644 "$tmpdir/Dockerfile" "$FXS_DATA_DIR/Dockerfile"
+  rm -rf "$tmpdir"
   log "fxs -> $FXS_INSTALL_DIR/fxs"
 
   case ":$PATH:" in
