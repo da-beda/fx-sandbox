@@ -12,7 +12,7 @@ The agent does not receive the host Docker socket, host home directory, root fil
 
 The selected project is readable and writable unless `--read-only-workspace` is used. The model can read code in that project and may send selected context to the configured inference service. Outbound network access is enabled unless `--offline` is used.
 
-Exported upstream `FX_*` process controls are intentionally forwarded into the container. They can change fx behavior, tracing, recording, update synchronization and other upstream runtime features, but do not by themselves add host filesystem mounts or widen the Docker network boundary. Boundary-owned controls such as permission mode, browser opening and automatic self-upgrade remain fixed by fxs.
+Exported upstream `FX_*` process controls are intentionally forwarded into the container. They can change fx behavior, tracing, recording, update synchronization and other upstream runtime features, but do not by themselves add host filesystem mounts or choose a different Docker network. Boundary-owned controls such as permission mode, browser opening and automatic self-upgrade remain fixed by fxs.
 
 ## Credentials
 
@@ -20,13 +20,21 @@ A credential passed into the container as an environment variable, or saved by f
 
 The preferred long-term hardening is a host-side credential/inference broker: the container talks to a narrow local proxy, while reusable provider credentials remain outside the container. That should remain a separate component rather than expanding core fxs.
 
-## Host services
+## Network and host services
 
-`host.docker.internal` is not added by default. `--host-gateway` explicitly expands reachability to host-local services and should be used only when required for local inference or another intentional host service.
+The default network is Docker `bridge`, because fx normally needs outbound inference access. `host.docker.internal` is not added by default; `--host-gateway` adds that convenience alias explicitly for intentional host-local services.
+
+**The absence of that alias does not imply host or LAN isolation.** A bridge-networked container can reach the Internet and routable LAN destinations, and depending on Docker platform, host routing and service bindings it may also reach host services through other routable addresses. Use `--offline` (`--network none`) when network denial is required.
+
+`--network NET` is an explicit advanced escape hatch. Choosing a more permissive network changes the authority boundary. In particular, `--network host` on platforms that support host networking gives the container substantially broader access to the host network namespace and should be treated as a deliberate reduction in isolation.
 
 ## Image and upgrade boundary
 
-The image filesystem is read-only, so fx cannot safely replace its own executable in place. fxs therefore forces `FX_AUTO_UPGRADE=0` and treats the image as the update unit. Rebuild or pull a newer image to update fx; pin the fx version at image build time when reproducibility matters.
+The image filesystem is read-only, so fx cannot safely replace its own executable in place. fxs therefore forces `FX_AUTO_UPGRADE=0` and treats the image as the update unit.
+
+An unpinned `fxs --build-image` resolves the current stable fx version on the host, refreshes the base-image manifest, and passes the exact fx version into Docker as a build argument. A new fx release therefore invalidates the fx-install cache layer; a changed Ubuntu base digest invalidates the OS dependency layer. Explicit `--fx-version` pins the fx version and bypasses the latest-version lookup.
+
+Pinning `FX_VERSION` is **not** a promise of bit-for-bit image reproducibility: the Ubuntu base tag, distribution packages and upstream canonical installer are still external inputs unless separately pinned. A published image digest is the immutable identity for a released image.
 
 This means native fx and sandboxed fx are not guaranteed to be the same version unless the operator keeps them aligned. That is a version-management property, not a fork of the agent loop.
 
