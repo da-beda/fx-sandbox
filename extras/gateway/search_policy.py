@@ -17,6 +17,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+import http_limits
+
 CATALOG_URL = "https://ai-gateway.vercel.sh/coding-agent/v1/models"
 CACHE_TTL_SECONDS = 300.0
 USER_AGENT = "fxs-gateway-search-policy/1"
@@ -80,7 +82,13 @@ def select_tool_capable_model(payload: Any) -> str:
 
 def _http_error(exc: urllib.error.HTTPError) -> str:
     try:
-        raw = exc.read().decode("utf-8", "replace")[:500]
+        raw = http_limits.read_limited(
+            exc,
+            http_limits.ERROR_BODY_BYTES,
+            "Gateway search-model catalog error body",
+        ).decode("utf-8", "replace")
+    except http_limits.BodyLimitError as limit_error:
+        return f"Gateway model catalog HTTP {exc.code}: {limit_error}"
     except Exception:
         raw = ""
     message = raw.strip()
@@ -96,7 +104,7 @@ def _http_error(exc: urllib.error.HTTPError) -> str:
                 message = str(data.get("message"))
     except json.JSONDecodeError:
         pass
-    message = " ".join(message.split())
+    message = " ".join(message.split())[:500]
     return f"Gateway model catalog HTTP {exc.code}" + (f": {message}" if message else "")
 
 
@@ -116,9 +124,16 @@ def _fetch_catalog(
     )
     try:
         with urlopen(req, timeout=15) as resp:
-            payload = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+            raw = http_limits.read_limited(
+                resp,
+                http_limits.MODEL_CATALOG_BYTES,
+                "Gateway search-model catalog",
+            )
+            payload = json.loads(raw.decode("utf-8", "replace") or "{}")
     except urllib.error.HTTPError as exc:
         return SearchModelResolution(error=_http_error(exc))
+    except http_limits.BodyLimitError as exc:
+        return SearchModelResolution(error=str(exc))
     except Exception as exc:
         return SearchModelResolution(error=f"Gateway model catalog unavailable: {exc}")
 
