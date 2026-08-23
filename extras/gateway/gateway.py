@@ -43,6 +43,7 @@ import responses_fidelity
 import tool_choice_fidelity
 import stream_cancel
 import stream_limits
+import http_limits
 
 LISTEN_DEFAULT = os.environ.get("FXS_GATEWAY_LISTEN", "127.0.0.1:18787")
 USER_AGENT = "fxs-gateway/1"
@@ -1853,7 +1854,13 @@ class Upstream:
         if self.api == "auto" and code != 200:
             peek = b""
             try:
-                peek = resp.read()
+                peek = http_limits.read_limited(
+                    resp,
+                    http_limits.ERROR_BODY_BYTES,
+                    "upstream Responses error body",
+                )
+            except http_limits.BodyLimitError:
+                raise
             except Exception:
                 peek = b""
             try:
@@ -1957,7 +1964,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._json(502, {"error": str(e)})
             return
         try:
-            body = resp.read()
+            try:
+                body = http_limits.read_limited(
+                    resp,
+                    http_limits.MODEL_CATALOG_BYTES,
+                    "upstream model catalog",
+                )
+            except http_limits.BodyLimitError as e:
+                self._json(502, {"error": str(e)})
+                return
             code = getattr(resp, "status", None) or getattr(resp, "code", 200)
             if code != 200:
                 self._send(code, body, resp.headers.get("Content-Type") or "application/json")
@@ -1977,7 +1992,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def _language_model(self) -> None:
         model = self.headers.get("ai-language-model-id") or ""
         stream = (self.headers.get("ai-language-model-streaming") or "").lower() == "true"
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = http_limits.parse_content_length(self.headers.get("Content-Length"))
+        except http_limits.RequestBodyTooLarge as e:
+            self._json(413, {"error": str(e)})
+            return
+        except http_limits.InvalidContentLength as e:
+            self._json(400, {"error": str(e)})
+            return
         raw = self.rfile.read(n) if n else b"{}"
         try:
             chat_req = chat_request(model, stream, raw)
@@ -2007,8 +2029,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
         try:
             code = getattr(resp, "status", None) or getattr(resp, "code", 200)
             if code != 200:
-                body = resp.read()
-                msg = upstream_http_error(code, body)
+                try:
+                    body = http_limits.read_limited(
+                        resp,
+                        http_limits.ERROR_BODY_BYTES,
+                        "upstream error body",
+                    )
+                    msg = upstream_http_error(code, body)
+                except http_limits.BodyLimitError as e:
+                    msg = str(e)
                 if stream:
                     try:
                         self.send_response(200)
@@ -2025,7 +2054,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self._json(502, {"error": msg})
                 return
             if not stream:
-                body = resp.read()
+                try:
+                    body = http_limits.read_limited(
+                        resp,
+                        http_limits.NONSTREAM_COMPLETION_BYTES,
+                        "upstream non-stream completion",
+                    )
+                except http_limits.BodyLimitError as e:
+                    self._json(502, {"error": str(e)})
+                    return
                 if used_responses:
                     try:
                         body = responses_to_chat(body)
@@ -2082,8 +2119,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     return
                 code = getattr(resp, "status", None) or getattr(resp, "code", 200)
                 if code != 200:
-                    body = resp.read()
-                    msg = upstream_http_error(code, body)
+                    try:
+                        body = http_limits.read_limited(
+                            resp,
+                            http_limits.ERROR_BODY_BYTES,
+                            "upstream search-continuation error body",
+                        )
+                        msg = upstream_http_error(code, body)
+                    except http_limits.BodyLimitError as e:
+                        msg = str(e)
                     self._write_events(Stream(allowed).fail(msg))
                     return
                 conv = ResponseStream(allowed) if used_responses else Stream(allowed)
