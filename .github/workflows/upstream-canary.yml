@@ -55,6 +55,8 @@ jobs:
 
           ./fxs -- --help > /tmp/fx-help.txt
           test -s /tmp/fx-help.txt
+          ./fxs -- status > /tmp/fx-status.txt
+          test -s /tmp/fx-status.txt
 
           ./fxs --dry-run --offline --read-only-workspace > /tmp/fxs-command.txt
           grep -Fq -- '--read-only' /tmp/fxs-command.txt
