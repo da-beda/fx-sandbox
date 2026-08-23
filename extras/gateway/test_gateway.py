@@ -134,11 +134,18 @@ class ChatRequest(unittest.TestCase):
         req = gateway.chat_request("m", False, b'{"prompt":[],"toolChoice":"auto"}')
         self.assertEqual(req["tool_choice"], "auto")
 
-    def test_named_tool_choice_ignored(self):
-        req = gateway.chat_request("m", False, json.dumps({
+    def test_named_tool_choice_preserved(self):
+        body = json.dumps({
             "prompt": [], "toolChoice": {"type": "tool", "toolName": "bash"},
-        }).encode())
-        self.assertNotIn("tool_choice", req)
+        }).encode()
+        chat = gateway.chat_request("m", False, body)
+        self.assertEqual(chat["tool_choice"], {
+            "type": "function", "function": {"name": "bash"},
+        })
+        responses = gateway.responses_request("m", False, body)
+        self.assertEqual(responses["tool_choice"], {
+            "type": "function", "name": "bash",
+        })
 
     def test_ignores_provider_options(self):
         req = gateway.chat_request("m", False, json.dumps({

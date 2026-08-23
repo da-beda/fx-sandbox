@@ -58,12 +58,13 @@ python3 extras/gateway/fidelity_matrix.py --json
 
 The matrix covers text, output limits, tool schemas/history, named tool choice, reasoning, image input, structured output, streamed text, streamed tool calls, and streamed reasoning for both Chat Completions and Responses paths. `pass` means the semantic case is preserved; `degraded` means the request is accepted or partially translated but some semantics are lost or rejected.
 
-The Responses path now preserves two semantics that were previously dropped:
+The adapter now preserves three semantics that were previously dropped:
 
 - Gateway image file parts become ordered OpenAI Responses `input_image` data URLs alongside `input_text` parts. This preserves an image **after fx has already admitted it**; it does not mark arbitrary local models as vision-capable.
 - Gateway JSON `responseFormat` becomes OpenAI Responses `text.format` with `type: json_schema` and `strict: true`.
+- Gateway named tool pinning maps to the native named-function choice on both wires: Chat Completions uses `{"type":"function","function":{"name":"..."}}`, while Responses uses `{"type":"function","name":"..."}`. Simple `auto`, `required`, and `none` choices remain unchanged.
 
-The remaining deliberate gaps stay visible: named tool pinning is dropped, and Chat-mode reasoning/image/structured-output handling remains degraded. Responses already preserves reasoning and reasoning deltas. These rows are frozen in CI so every future fidelity improvement changes both implementation and evidence together.
+The remaining deliberate gaps stay visible: Chat-mode reasoning/image/structured-output handling remains degraded, while Responses preserves reasoning, reasoning deltas, admitted images, structured output, and named tool choice. These rows are frozen in CI so every future fidelity improvement changes both implementation and evidence together.
 
 This is also the migration contract for native upstream support: a native transport being present is not sufficient by itself. The WebUI should prefer native `fx` for a capability only when the installed binary's required semantics are proven equivalent or better for that use case.
 
@@ -75,6 +76,7 @@ The adapter is tested at multiple levels:
 python3 extras/gateway/test_gateway.py
 python3 extras/gateway/test_search_policy.py
 python3 extras/gateway/test_responses_fidelity.py
+python3 extras/gateway/test_tool_choice_fidelity.py
 python3 extras/gateway/test_fidelity_matrix.py
 python3 extras/gateway/test_native_fx.py
 python3 extras/ui/test_server.py
