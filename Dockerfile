@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Minimal reference runtime for fxs. It delegates fx installation to fx's own
 # canonical installer instead of duplicating release/install logic here.
 FROM ubuntu:24.04
