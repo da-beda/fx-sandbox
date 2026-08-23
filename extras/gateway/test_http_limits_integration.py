@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import socket
 import sys
 import threading
 import unittest
@@ -27,44 +26,43 @@ class HttpBodyLimitIntegration(unittest.TestCase):
         server.server_close()
         thread.join(timeout=1)
 
+    def _declared_request_without_body(self, adapter, content_length: str):
+        """Send headers only, then read the complete early-rejection response."""
+        conn = http.client.HTTPConnection(
+            adapter.server_address[0], adapter.server_address[1], timeout=3
+        )
+        try:
+            conn.putrequest("POST", "/v3/ai/language-model")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", content_length)
+            conn.endheaders()
+            response = conn.getresponse()
+            return response.status, response.read()
+        finally:
+            conn.close()
+
     def test_oversized_inbound_gateway_request_is_413_before_body_read(self):
         adapter, thread = self.start_adapter(
             gateway.Upstream("http://127.0.0.1:1/v1", "probe", timeout=1, api="chat")
         )
-        sock = socket.create_connection(adapter.server_address, timeout=2)
         try:
-            request = (
-                b"POST /v3/ai/language-model HTTP/1.1\r\n"
-                b"Host: 127.0.0.1\r\n"
-                b"Content-Type: application/json\r\n"
-                + f"Content-Length: {http_limits.GATEWAY_REQUEST_BYTES + 1}\r\n".encode()
-                + b"\r\n"
+            status, body = self._declared_request_without_body(
+                adapter, str(http_limits.GATEWAY_REQUEST_BYTES + 1)
             )
-            sock.sendall(request)
-            response = sock.recv(4096)
-            self.assertIn(b" 413 ", response.split(b"\r\n", 1)[0])
-            self.assertIn(b"local safety limit", response)
+            self.assertEqual(status, 413)
+            self.assertIn(b"local safety limit", body)
         finally:
-            sock.close()
             self.stop_adapter(adapter, thread)
 
     def test_negative_content_length_is_400_not_read_all(self):
         adapter, thread = self.start_adapter(
             gateway.Upstream("http://127.0.0.1:1/v1", "probe", timeout=1, api="chat")
         )
-        sock = socket.create_connection(adapter.server_address, timeout=2)
         try:
-            sock.sendall(
-                b"POST /v3/ai/language-model HTTP/1.1\r\n"
-                b"Host: 127.0.0.1\r\n"
-                b"Content-Type: application/json\r\n"
-                b"Content-Length: -1\r\n\r\n"
-            )
-            response = sock.recv(4096)
-            self.assertIn(b" 400 ", response.split(b"\r\n", 1)[0])
-            self.assertIn(b"invalid Content-Length", response)
+            status, body = self._declared_request_without_body(adapter, "-1")
+            self.assertEqual(status, 400)
+            self.assertIn(b"invalid Content-Length", body)
         finally:
-            sock.close()
             self.stop_adapter(adapter, thread)
 
     def _start_declared_upstream(self, *, status: int, declared_length: int):
