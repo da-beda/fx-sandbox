@@ -19,6 +19,8 @@ grep -Fq 'FX_*)' "$ROOT/fxs" \
   || fail "generic upstream FX_* passthrough missing"
 grep -Fq -- 'docker build --pull' "$ROOT/fxs" \
   || fail "explicit image refresh must pull the current base manifest"
+grep -Fq 'fx cannot self-upgrade inside fxs' "$ROOT/fxs" \
+  || fail "explicit fx upgrade boundary guidance missing"
 
 # FX_VERSION must not invalidate the OS dependency layer. Keep the required ARG
 # after the apt layer and before the canonical fx install layer.
@@ -52,6 +54,8 @@ grep -Fq 'does not imply host or LAN isolation' "$ROOT/docs/THREAT_MODEL.md" \
   || fail "network-boundary nuance missing from threat model"
 grep -Fq 'build context' "$ROOT/docs/THREAT_MODEL.md" \
   || fail "Docker build-context boundary is not documented"
+grep -Fq 'Supply-chain boundary' "$ROOT/docs/THREAT_MODEL.md" \
+  || fail "upstream supply-chain trust boundary is not documented"
 if grep -Fq 'v0.2.0' "$ROOT/README.md"; then
   fail "README still references nonexistent v0.2.0 tag"
 fi
@@ -78,5 +82,21 @@ grep -Fq 'UPSTREAM_FX_VERSION' "$ROOT/.github/workflows/release-image.yml" \
   || fail "release does not record embedded fx version"
 [[ -f "$ROOT/.github/workflows/upstream-canary.yml" ]] \
   || fail "upstream compatibility canary missing"
+
+# All third-party workflow actions must be pinned to immutable 40-hex commit
+# SHAs. Dependabot keeps those pinned dependencies current without returning to
+# mutable major-version refs in privileged workflows.
+if grep -RniE '^[[:space:]]*-[[:space:]]+uses:[[:space:]]+[^[:space:]#]+@v[0-9]' \
+  "$ROOT/.github/workflows"; then
+  fail "GitHub Actions must not use mutable @vN refs"
+fi
+while IFS= read -r use_line; do
+  ref="${use_line##*@}"
+  ref="${ref%% *}"
+  [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || fail "GitHub Action is not pinned to a 40-hex SHA: $use_line"
+done < <(grep -RhE '^[[:space:]]*-[[:space:]]+uses:[[:space:]]+' "$ROOT/.github/workflows")
+[[ -f "$ROOT/.github/dependabot.yml" ]] || fail "Dependabot config missing for pinned GitHub Actions"
+grep -Fq 'package-ecosystem: github-actions' "$ROOT/.github/dependabot.yml" \
+  || fail "Dependabot is not configured for GitHub Actions"
 
 printf 'test-policy: ok\n'
