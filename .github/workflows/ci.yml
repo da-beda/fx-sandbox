@@ -56,6 +56,45 @@ jobs:
           ./fxs -- status > /tmp/fx-status.txt
           test -s /tmp/fx-status.txt
 
+  arm64-image:
+    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - name: Resolve current stable fx
+        id: fx
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+            https://releases.fx.sh/latest.txt | tr -d '[:space:]')"
+          [[ -n "$version" ]]
+          case "$version" in
+            *[!0-9A-Za-z._+-]*) echo "invalid fx version: $version" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build and run arm64 reference image
+        env:
+          FX_VERSION: ${{ steps.fx.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --pull \
+            --platform linux/arm64 \
+            --build-arg "FX_VERSION=$FX_VERSION" \
+            --tag fxs-arm64-ci \
+            --load \
+            .
+          [[ "$(docker image inspect fxs-arm64-ci --format '{{.Architecture}}')" == arm64 ]]
+          actual="$(docker run --rm fxs-arm64-ci fx --version | tr -d '[:space:]')"
+          expected="${FX_VERSION#v}"
+          [[ "$actual" == "$expected" ]] || {
+            echo "arm64 fx version mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+
   extras:
     timeout-minutes: 10
     runs-on: ubuntu-latest
