@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: ShellCheck
+        run: shellcheck --severity=warning fxs install.sh setup-fx.sh tests/*.sh
+      - name: YAML syntax/style
+        run: >-
+          yamllint -d '{extends: relaxed, rules: {line-length: disable, truthy: disable}}'
+          .github/workflows/*.yml examples/docker-compose.yml
+
   shell:
     timeout-minutes: 10
     strategy:
