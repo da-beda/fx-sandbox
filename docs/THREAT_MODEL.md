@@ -34,6 +34,8 @@ The image filesystem is read-only, so fx cannot safely replace its own executabl
 
 An unpinned `fxs --build-image` resolves the current stable fx version on the host, refreshes the base-image manifest, and passes the exact fx version into Docker as a build argument. A new fx release therefore invalidates the fx-install cache layer; a changed Ubuntu base digest invalidates the OS dependency layer. Explicit `--fx-version` pins the fx version and bypasses the latest-version lookup.
 
+The reference Docker build context is deliberately isolated from persistent fxs data. The installed Dockerfile normally lives under `~/.local/share/fxs`, next to the default `state/` tree, but `fxs --build-image` copies only that Dockerfile into a fresh temporary directory and uses the temporary directory as Docker's build context. The temporary context is removed after the build. This prevents session/auth/state files from being sent to the Docker daemon or a remote builder merely because they share a parent directory with the installed Dockerfile. The repository `.dockerignore` also denies context contents by default as defense in depth.
+
 Pinning `FX_VERSION` is **not** a promise of bit-for-bit image reproducibility: the Ubuntu base tag, distribution packages and upstream canonical installer are still external inputs unless separately pinned. A published image digest is the immutable identity for a released image.
 
 This means native fx and sandboxed fx are not guaranteed to be the same version unless the operator keeps them aligned. That is a version-management property, not a fork of the agent loop.
