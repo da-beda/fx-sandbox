@@ -100,22 +100,29 @@ hash_path() {
   fi
 }
 
+validate_fx_version() {
+  local version="$1"
+  [[ -n "$version" ]] || die "fx version must not be empty"
+  case "$version" in
+    *[!0-9A-Za-z._+-]*) die "invalid fx version: $version" ;;
+  esac
+}
+
 resolve_latest_fx_version() {
   local version=""
   if command -v curl >/dev/null 2>&1; then
-    version="$(curl -fsSL https://releases.fx.sh/latest.txt)" \
+    version="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+      https://releases.fx.sh/latest.txt)" \
       || die "could not resolve the latest stable fx release"
   elif command -v wget >/dev/null 2>&1; then
-    version="$(wget -qO- https://releases.fx.sh/latest.txt)" \
+    version="$(wget -qO- --tries=3 --timeout=30 https://releases.fx.sh/latest.txt)" \
       || die "could not resolve the latest stable fx release"
   else
     die "curl or wget is required to resolve the latest stable fx release"
   fi
   version="$(printf '%s' "$version" | tr -d '[:space:]')"
   [[ -n "$version" ]] || die "latest stable fx release response was empty"
-  case "$version" in
-    *[!0-9A-Za-z._+-]*) die "invalid latest fx release: $version" ;;
-  esac
+  validate_fx_version "$version"
   printf '%s\n' "$version"
 }
 
@@ -214,8 +221,10 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
   }
   if [[ -z "$FX_VERSION" ]]; then
     FX_VERSION="$(resolve_latest_fx_version)"
+  else
+    validate_fx_version "$FX_VERSION"
   fi
-  build=(docker build --tag "$IMAGE" --file "$DOCKERFILE" --build-arg "FX_VERSION=$FX_VERSION")
+  build=(docker build --pull --tag "$IMAGE" --file "$DOCKERFILE" --build-arg "FX_VERSION=$FX_VERSION")
   build+=("$(dirname "$DOCKERFILE")")
   log "building $IMAGE with fx $FX_VERSION"
   exec "${build[@]}"
