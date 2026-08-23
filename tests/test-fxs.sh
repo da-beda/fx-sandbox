@@ -60,7 +60,13 @@ assert_not_has "$out" "FX_AUTO_UPGRADE=1"
 # An unpinned image refresh resolves the current stable fx version on the host
 # and passes that exact value as a Docker build arg. The build also pulls the
 # current base-image manifest. Explicit pins bypass latest-version resolution.
-mkdir -p "$TMP/buildbin"
+#
+# Reproduce the installed layout too: the reference Dockerfile lives beside
+# fxs-owned state. The Docker daemon must receive only a temporary one-file build
+# context, never the containing state directory.
+mkdir -p "$TMP/buildbin" "$TMP/data/state/project/home"
+cp "$ROOT/Dockerfile" "$TMP/data/Dockerfile"
+printf 'DO_NOT_SEND_ME\n' > "$TMP/data/state/project/home/secret"
 cat > "$TMP/buildbin/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -68,6 +74,10 @@ case "${1:-}" in
   build)
     shift
     printf '%s\n' "$@" > "${FXS_BUILD_LOG:?}"
+    context=""
+    for arg in "$@"; do context="$arg"; done
+    printf '%s\n' "$context" > "${FXS_CONTEXT_PATH_LOG:?}"
+    (cd "$context" && /bin/ls -A) > "${FXS_CONTEXT_LOG:?}"
     exit 0
     ;;
   *) exit 0 ;;
@@ -81,8 +91,9 @@ EOF_CURL
 chmod +x "$TMP/buildbin/docker" "$TMP/buildbin/curl"
 : > "$TMP/curl.log"
 PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
-  FXS_BUILD_LOG="$TMP/build.log" FXS_CURL_LOG="$TMP/curl.log" \
-  FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
+  FXS_BUILD_LOG="$TMP/build.log" FXS_CONTEXT_LOG="$TMP/context.log" \
+  FXS_CONTEXT_PATH_LOG="$TMP/context-path.log" FXS_CURL_LOG="$TMP/curl.log" \
+  FXS_DOCKERFILE="$TMP/data/Dockerfile" FXS_IMAGE=fxs-refresh-test \
   "$FXS" --build-image >/dev/null
 build_out="$(cat "$TMP/build.log")"
 assert_has "$build_out" "--pull"
@@ -90,11 +101,17 @@ assert_has "$build_out" "--build-arg"
 assert_has "$build_out" "FX_VERSION=0.0.99"
 curl_out="$(cat "$TMP/curl.log")"
 assert_has "$curl_out" "https://releases.fx.sh/latest.txt"
+context_out="$(cat "$TMP/context.log")"
+[[ "$context_out" == "Dockerfile" ]] || fail "Docker build context exposed files beyond Dockerfile: $context_out"
+context_path="$(cat "$TMP/context-path.log")"
+[[ "$context_path" != "$TMP/data" ]] || fail "Docker build used the fxs data/state directory as context"
+[[ ! -e "$context_path" ]] || fail "temporary Docker build context was not cleaned up"
 
 curl_before="$curl_out"
 PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
-  FXS_BUILD_LOG="$TMP/build.log" FXS_CURL_LOG="$TMP/curl.log" \
-  FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
+  FXS_BUILD_LOG="$TMP/build.log" FXS_CONTEXT_LOG="$TMP/context.log" \
+  FXS_CONTEXT_PATH_LOG="$TMP/context-path.log" FXS_CURL_LOG="$TMP/curl.log" \
+  FXS_DOCKERFILE="$TMP/data/Dockerfile" FXS_IMAGE=fxs-refresh-test \
   "$FXS" --build-image --fx-version 9.9.9 >/dev/null
 build_out="$(cat "$TMP/build.log")"
 assert_has "$build_out" "--pull"
@@ -108,8 +125,9 @@ curl_after="$(cat "$TMP/curl.log")"
 : > "$TMP/build.log"
 curl_before="$curl_after"
 if PATH="$TMP/buildbin:$PATH" HOME="$TMP/home" \
-  FXS_BUILD_LOG="$TMP/build.log" FXS_CURL_LOG="$TMP/curl.log" \
-  FXS_DOCKERFILE="$ROOT/Dockerfile" FXS_IMAGE=fxs-refresh-test \
+  FXS_BUILD_LOG="$TMP/build.log" FXS_CONTEXT_LOG="$TMP/context.log" \
+  FXS_CONTEXT_PATH_LOG="$TMP/context-path.log" FXS_CURL_LOG="$TMP/curl.log" \
+  FXS_DOCKERFILE="$TMP/data/Dockerfile" FXS_IMAGE=fxs-refresh-test \
   "$FXS" --build-image --fx-version 'bad/value' >/dev/null 2>&1; then
   fail "invalid fx version was accepted"
 fi
