@@ -22,6 +22,7 @@ DRY_RUN=0
 VERBOSE="${FXS_VERBOSE:-0}"
 BUILD_IMAGE=0
 FX_VERSION="${FXS_FX_VERSION:-}"
+OS_REFRESH="${FXS_OS_REFRESH:-}"
 MEMORY="${FXS_MEMORY:-}"
 CPUS="${FXS_CPUS:-}"
 PIDS="${FXS_PIDS:-}"
@@ -62,7 +63,7 @@ Everything after the first unrecognized argument is passed to fx unchanged.
 Use `fxs -- --help` when you specifically want fx's own `--help` output.
 
 ENVIRONMENT
-  FXS_IMAGE, FXS_WORKSPACE, FXS_STATE_ROOT, FXS_NETWORK
+  FXS_IMAGE, FXS_WORKSPACE, FXS_STATE_ROOT, FXS_NETWORK, FXS_OS_REFRESH
   FXS_MEMORY, FXS_CPUS, FXS_PIDS, FXS_HOST_GATEWAY, FXS_VERBOSE
   AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN
   Exported upstream FX_* process controls are forwarded automatically.
@@ -106,6 +107,14 @@ validate_fx_version() {
   [[ -n "$version" ]] || die "fx version must not be empty"
   case "$version" in
     *[!0-9A-Za-z._+-]*) die "invalid fx version: $version" ;;
+  esac
+}
+
+validate_os_refresh() {
+  local token="$1"
+  [[ -n "$token" ]] || die "OS refresh token must not be empty"
+  case "$token" in
+    *[!0-9A-Za-z._+-]*) die "invalid OS refresh token: $token" ;;
   esac
 }
 
@@ -232,6 +241,11 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
   else
     validate_fx_version "$FX_VERSION"
   fi
+  if [[ -z "$OS_REFRESH" ]]; then
+    command -v date >/dev/null 2>&1 || die "date is required to refresh OS package cache"
+    OS_REFRESH="$(date -u +%Y-%m-%d)"
+  fi
+  validate_os_refresh "$OS_REFRESH"
 
   # The installed reference Dockerfile normally lives beside fxs state under
   # ~/.local/share/fxs. Never use that directory as Docker build context: even
@@ -247,10 +261,11 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
     docker build --pull
     --tag "$IMAGE"
     --file "$build_context/Dockerfile"
+    --build-arg "FXS_OS_REFRESH=$OS_REFRESH"
     --build-arg "FX_VERSION=$FX_VERSION"
     "$build_context"
   )
-  log "building $IMAGE with fx $FX_VERSION"
+  log "building $IMAGE with fx $FX_VERSION (os-refresh=$OS_REFRESH)"
   status=0
   "${build[@]}" || status=$?
   trap - EXIT
