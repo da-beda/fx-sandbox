@@ -57,6 +57,13 @@ assert_has "$out" "FX_FUTURE_TEST"
 assert_has "$out" "FX_AUTO_UPGRADE=0"
 assert_not_has "$out" "FX_AUTO_UPGRADE=1"
 
+# Explicit upstream self-upgrade cannot work against the intentionally read-only
+# image. Fail before Docker launch with the correct image-refresh guidance.
+if HOME="$TMP/home" "$FXS" --dry-run upgrade >/tmp/fxs-upgrade.out 2>/tmp/fxs-upgrade.err; then
+  fail "fxs forwarded fx upgrade into the read-only image"
+fi
+grep -Fq 'fxs --build-image' /tmp/fxs-upgrade.err || fail "fxs upgrade did not explain the image update path"
+
 # An unpinned image refresh resolves the current stable fx version on the host
 # and passes that exact value as a Docker build arg. The build also pulls the
 # current base-image manifest. Explicit pins bypass latest-version resolution.
