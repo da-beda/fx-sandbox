@@ -53,6 +53,8 @@ jobs:
           ./fxs -- --version
           ./fxs -- --help > /tmp/fx-help.txt
           test -s /tmp/fx-help.txt
+          ./fxs -- status > /tmp/fx-status.txt
+          test -s /tmp/fx-status.txt
 
   extras:
     timeout-minutes: 10
