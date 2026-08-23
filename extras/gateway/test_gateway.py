@@ -1430,8 +1430,8 @@ class ResponseSSE(unittest.TestCase):
                 )
                 self._buf = io.BytesIO(raw)
 
-            def readline(self):
-                return self._buf.readline()
+            def readline(self, n=-1):
+                return self._buf.readline(n)
 
         payloads = list(gateway.read_sse_data(Fake()))
         self.assertEqual(json.loads(payloads[0])["type"], "response.output_text.delta")

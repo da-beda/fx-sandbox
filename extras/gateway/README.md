@@ -47,6 +47,14 @@ Cancellation is handled separately from completion integrity. While a provider r
 
 This is deliberately **not** implemented by shortening the provider timeout. The existing long timeout remains available for slow local models, large cold starts, and long reasoning pauses; only an observed downstream disconnect interrupts the upstream response. Socket-level tests cover nested urllib socket discovery, blocked-read wakeup, non-consuming `MSG_PEEK`, live-peer shutdown, and close-only response doubles.
 
+## Bounded upstream stream state
+
+OpenAI-compatible responses are untrusted input. `stream_limits.py` places finite ceilings on framing and state accumulation without changing ordinary generation budgets: 32 MiB per SSE line, 64 MiB aggregate raw SSE bytes per provider response, 100,000 SSE events, 128 tool calls, 1,024 UTF-8 bytes per tool/call identity, and 4 MiB of accumulated arguments per tool call.
+
+`read_sse_data()` uses a bounded `readline(limit + 1)` so an overlong line is rejected before JSON decoding. Chat Completions and Responses share the same tool-count, identity, and argument accounting. A violation raises a typed local stream error and is converted by the normal handler into an error finish; partial over-limit state is never accepted as a completed turn.
+
+These are resource-safety ceilings, not latency or token-policy knobs. They intentionally follow the scale used by upstream fx's native OpenAI transport work and remain far above normal agent traffic. Tests exercise line length, aggregate bytes, event count, tool count, identities, argument accumulation, multiline SSE framing, and valid in-bound streams.
+
 ## Vercel-backed search with another LLM provider
 
 The WebUI can retain a Vercel AI Gateway key for web search while the main model runs through OpenRouter, xAI, Ollama, or another OpenAI-compatible endpoint. That search path must not copy upstream `fx`'s current default model into this repository.
@@ -92,6 +100,8 @@ python3 extras/gateway/test_search_policy.py
 python3 extras/gateway/test_responses_fidelity.py
 python3 extras/gateway/test_tool_choice_fidelity.py
 python3 extras/gateway/test_stream_cancel.py
+python3 extras/gateway/test_stream_cancel_integration.py
+python3 extras/gateway/test_stream_limits.py
 python3 extras/gateway/test_fidelity_matrix.py
 python3 extras/gateway/test_native_fx.py
 python3 extras/ui/test_server.py
