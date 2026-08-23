@@ -382,6 +382,7 @@ def _base_probe_environment(home: Path) -> dict[str, str]:
     env.update({
         "HOME": str(home),
         "FX_MODEL": PROBE_MODEL,
+        "FX_SKIP_ONBOARDING": "1",
         # If an older fx ignores the tested OpenAI-compatible contract, keep
         # any legacy Gateway attempt local and fast instead of allowing the
         # capability probe to contact a real provider.
