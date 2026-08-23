@@ -17,13 +17,17 @@ The intended migration rule is conservative:
 
 ## Native handoff gate
 
-Do not infer native provider support from an `fx` version number, branch name, or help-text guess. The upstream OpenAI-compatible work is environment-driven, so `native_fx.py` can exercise the installed binary against an ephemeral loopback `/v1` server using the documented provider contract:
+Do not infer native provider support from an `fx` version number, branch name, PR number, or help-text guess. There are currently two competing upstream local-inference contracts: PR #168 proposes `OPENAI_API_KEY` + `FX_OPENAI_BASE_URL` + `FX_OPENAI_API_STYLE`, while PR #159 proposes `FX_API_KEY` + `FX_BASE_URL` for Chat Completions. Either design, or a successor derived from one of them, could land first.
+
+`native_fx.py` therefore tests the installed binary behaviorally against an ephemeral loopback `/v1` server:
 
 ```bash
 python3 extras/gateway/native_fx.py --json --probe-transport
 ```
 
-The probe uses no real provider credential and sends no model request to the Internet. It gives `fx` an isolated HOME, a dummy `OPENAI_API_KEY`, a loopback `FX_OPENAI_BASE_URL`, an explicit `FX_OPENAI_API_STYLE`, and a deterministic fake model. Chat Completions and Responses are tested independently. A capability is considered native only when the installed binary selects the expected `/v1` transport, accepts its streamed response, exits successfully, and returns the probe marker.
+The probe uses no real provider credential and sends no model request to the Internet. Each known configuration contract gets its own isolated HOME and environment so one proposal cannot make another appear to work accidentally. Chat Completions and Responses are tested independently. A capability is considered native only when the installed binary selects the expected loopback endpoint, accepts its streamed response, exits successfully, and returns the probe marker.
+
+Machine-readable output includes the exact contracts that succeeded, for example `openai_chat_contracts: ["fx_openai", "custom_endpoint"]` and `openai_responses_contracts: ["fx_openai"]`. That matters for later routing: knowing that native transport exists is not enough; the WebUI also needs to know which installed configuration contract actually activates it.
 
 Running the command without `--probe-transport` is metadata-only and deliberately claims no provider capability:
 
@@ -31,7 +35,7 @@ Running the command without `--probe-transport` is metadata-only and deliberatel
 python3 extras/gateway/native_fx.py --json
 ```
 
-This gives the WebUI and future migration work a conservative rule: switch a provider path to native `fx` only after the installed binary itself proves the required wire works. Until then, keep using the adapter. Native Chat support alone is also not enough to retire the adapter's Responses path.
+This gives the WebUI and future migration work a conservative rule: switch a provider path to native `fx` only after the installed binary itself proves the required wire and reports the contract needed to configure it. Until then, keep using the adapter. Native Chat support alone is also not enough to retire the adapter's Responses path.
 
 ## Vercel-backed search with another LLM provider
 
