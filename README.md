@@ -146,27 +146,37 @@ container and sessions from different host projects do not collide.
 
 ## fx and fxs updates
 
-The **container image is the fx update unit**. Upstream fx can normally replace
-its own executable during auto-upgrade, but fxs intentionally runs a read-only
-image filesystem. To avoid a pointless/failing self-update path, fxs forces:
+The **container image is the fx update unit**. Upstream fx normally supports
+self-upgrade, but fxs intentionally runs a read-only image filesystem. Therefore
+fxs forces:
 
 ```text
 FX_AUTO_UPGRADE=0
 ```
 
-Refresh the reference image to the current stable fx and current base-image
-manifest with:
+and blocks `fxs upgrade` with guidance to refresh the image instead:
 
 ```bash
 fxs --build-image
 ```
 
-The Dockerfile keeps OS dependencies and fx installation in separate layers, so
-a new fx release invalidates the fx-install layer without needlessly rebuilding
-the OS layer when the Ubuntu base itself is unchanged.
+A supported image refresh has three independent freshness inputs:
 
-An existing image can legitimately lag behind native fx. When exact fx-version
-parity matters, compare explicitly:
+```text
+base-image digest      -> base filesystem freshness
+FXS_OS_REFRESH         -> OS/apt package cache freshness
+FX_VERSION             -> fx release freshness
+```
+
+`fxs --build-image` uses `docker build --pull` to check the current base-image
+manifest. If `FXS_OS_REFRESH` is unset, fxs derives the current UTC date and uses
+it as a cache key before the apt layer, so rebuilding on a new day refreshes
+package indexes/packages even when the Ubuntu base digest has not changed. The
+fx installation is a later layer keyed by the exact fx version, so an fx-only
+release does not needlessly invalidate already-fresh OS dependencies.
+
+An existing image can legitimately lag behind native fx. Compare versions when
+parity matters:
 
 ```bash
 fx --version
@@ -179,10 +189,16 @@ Pin only the fx version with:
 fxs --build-image --fx-version <version>
 ```
 
-Explicit pins skip the latest-fx lookup, but the Ubuntu base tag and distribution
-packages remain external inputs. For tagged fxs releases, the release workflow
-records `UPSTREAM_FX_VERSION`, publishes a multi-architecture image, and signs its
-immutable image digest.
+An explicit fx pin skips the latest-fx lookup but keeps the normal base/OS
+freshness behavior. `FXS_OS_REFRESH` is an advanced cache-control override and
+normally should be left unset. The Ubuntu base tag, distribution package
+repositories and upstream canonical installer remain external inputs, so a local
+fx-version pin is not a bit-for-bit image reproducibility guarantee.
+
+For tagged fxs releases, the release workflow refreshes OS packages for each
+release run, records `UPSTREAM_FX_VERSION`, publishes amd64/arm64 images, and
+signs the immutable image digest. Normal CI also builds and executes an arm64
+reference image under QEMU so arm64 is not first exercised on release day.
 
 `fxs` itself has no background updater. Refresh the installed wrapper and
 reference Dockerfile explicitly by rerunning the installer:
@@ -293,6 +309,12 @@ A host-side credential/inference broker is the preferred future hardening for
 reusable secrets, but it should remain a separate component rather than
 expanding core fxs.
 
+The release workflows pin third-party GitHub Actions to immutable commit SHAs;
+Dependabot is configured to propose updates to those pins. The upstream fx
+installer/CDN, base image registry and distribution package repositories remain
+explicit trusted build inputs. See the threat model for the exact supply-chain
+boundary.
+
 See [docs/DESIGN.md](docs/DESIGN.md) and
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
@@ -300,12 +322,14 @@ See [docs/DESIGN.md](docs/DESIGN.md) and
 
 ```bash
 bash -n fxs install.sh setup-fx.sh tests/*.sh
+shellcheck --severity=warning fxs install.sh setup-fx.sh tests/*.sh
 bash tests/run.sh
 python3 extras/gateway/test_gateway.py
 python3 extras/ui/test_server.py
 ```
 
-CI runs the core shell tests on Linux and macOS, runs the retained extras' stdlib
-unit suites on Linux, validates the Compose example, and exercises the current
-stable fx through the real fxs wrapper. Tagged releases build and keylessly sign
-multi-architecture reference images for `linux/amd64` and `linux/arm64`.
+CI runs static shell/YAML lint, the core shell tests on Linux and macOS, the
+retained extras' stdlib suites, Compose validation, live current-stable fx through
+the real wrapper, and an executable arm64 image smoke test. Tagged releases build
+and keylessly sign multi-architecture reference images for `linux/amd64` and
+`linux/arm64`.
