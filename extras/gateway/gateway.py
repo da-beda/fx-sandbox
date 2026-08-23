@@ -985,7 +985,16 @@ def _gateway_search_headers(key: str, model: str) -> dict[str, str]:
 
 
 def _gateway_http_error(exc: urllib.error.HTTPError) -> str:
-    raw = exc.read().decode("utf-8", "replace")[:500]
+    try:
+        raw = http_limits.read_limited(
+            exc,
+            http_limits.ERROR_BODY_BYTES,
+            "Vercel Gateway search error body",
+        ).decode("utf-8", "replace")[:500]
+    except http_limits.BodyLimitError as limit_error:
+        return f"Vercel AI Gateway search failed (HTTP {exc.code}). {limit_error}"
+    except Exception:
+        raw = ""
     msg = raw
     try:
         data = json.loads(raw)
@@ -1054,10 +1063,26 @@ def run_direct_perplexity_search(query: str, max_results: int = 5) -> dict[str, 
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+            raw = http_limits.read_limited(
+                resp,
+                http_limits.SEARCH_RESPONSE_BYTES,
+                "Perplexity search response",
+            )
+            data = json.loads(raw.decode("utf-8", "replace") or "{}")
     except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", "replace")[:300]
+        try:
+            err = http_limits.read_limited(
+                e,
+                http_limits.ERROR_BODY_BYTES,
+                "Perplexity search error body",
+            ).decode("utf-8", "replace")[:300]
+        except http_limits.BodyLimitError as limit_error:
+            err = str(limit_error)
+        except Exception:
+            err = ""
         return {"error": f"Perplexity search failed (HTTP {e.code}). {err}"}
+    except http_limits.BodyLimitError as e:
+        return {"error": f"Perplexity search failed. {e}"}
     except Exception as e:
         return {"error": f"Perplexity search failed. {e}"}
     rows = data.get("results") if isinstance(data, dict) else None
@@ -1282,10 +1307,26 @@ def run_openrouter_search(query: str, max_results: int = 5) -> dict[str, Any]:
     )
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+            raw = http_limits.read_limited(
+                resp,
+                http_limits.SEARCH_RESPONSE_BYTES,
+                "OpenRouter search response",
+            )
+            data = json.loads(raw.decode("utf-8", "replace") or "{}")
     except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", "replace")[:300]
+        try:
+            err = http_limits.read_limited(
+                e,
+                http_limits.ERROR_BODY_BYTES,
+                "OpenRouter search error body",
+            ).decode("utf-8", "replace")[:300]
+        except http_limits.BodyLimitError as limit_error:
+            err = str(limit_error)
+        except Exception:
+            err = ""
         return {"error": f"OpenRouter search failed (HTTP {e.code}). {err}"}
+    except http_limits.BodyLimitError as e:
+        return {"error": f"OpenRouter search failed. {e}"}
     except Exception as e:
         return {"error": f"OpenRouter search failed. {e}"}
     return _hits_from_openrouter(data, query, max_results)
