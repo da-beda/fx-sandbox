@@ -3,31 +3,111 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  lint:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: ShellCheck
+        run: shellcheck --severity=warning fxs install.sh setup-fx.sh tests/*.sh
+      - name: YAML syntax/style
+        run: >-
+          yamllint -d '{extends: relaxed, rules: {line-length: disable, truthy: disable}}'
+          .github/dependabot.yml .github/workflows/*.yml examples/docker-compose.yml
+
   shell:
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Syntax
         run: bash -n fxs install.sh setup-fx.sh tests/*.sh
       - name: Tests
         run: bash tests/run.sh
 
   image:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build/refresh reference image through fxs
         env:
           FXS_IMAGE: fxs-ci
           FXS_DOCKERFILE: ${{ github.workspace }}/Dockerfile
         run: ./fxs --build-image --verbose
-      - name: Verify fx in reference image
-        run: docker run --rm fxs-ci fx --version
+      - name: Exercise current stable fx through the real wrapper
+        env:
+          FXS_IMAGE: fxs-ci
+          FXS_STATE_ROOT: ${{ runner.temp }}/fxs-state
+        run: |
+          set -euo pipefail
+          ./fxs -- --version
+          ./fxs -- --help > /tmp/fx-help.txt
+          test -s /tmp/fx-help.txt
+          ./fxs -- status > /tmp/fx-status.txt
+          test -s /tmp/fx-status.txt
+
+  arm64-image:
+    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - name: Resolve current stable fx
+        id: fx
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+            https://releases.fx.sh/latest.txt | tr -d '[:space:]')"
+          [[ -n "$version" ]]
+          case "$version" in
+            *[!0-9A-Za-z._+-]*) echo "invalid fx version: $version" >&2; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build and run arm64 reference image
+        env:
+          FX_VERSION: ${{ steps.fx.outputs.version }}
+          OS_REFRESH: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --pull \
+            --platform linux/arm64 \
+            --build-arg "FXS_OS_REFRESH=$OS_REFRESH" \
+            --build-arg "FX_VERSION=$FX_VERSION" \
+            --tag fxs-arm64-ci \
+            --load \
+            .
+          [[ "$(docker image inspect fxs-arm64-ci --format '{{.Architecture}}')" == arm64 ]]
+          actual="$(docker run --rm fxs-arm64-ci fx --version | tr -d '[:space:]')"
+          expected="${FX_VERSION#v}"
+          [[ "$actual" == "$expected" ]] || {
+            echo "arm64 fx version mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+
+  extras:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Retained gateway tests
+        run: python3 extras/gateway/test_gateway.py
+      - name: Retained UI tests
+        run: python3 extras/ui/test_server.py
+      - name: Validate illustrative Compose shape
+        env:
+          FXS_UID: "1000"
+          FXS_GID: "1000"
+        run: docker compose -f examples/docker-compose.yml config >/tmp/fxs-compose.yml

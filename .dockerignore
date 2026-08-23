@@ -1,11 +1,6 @@
-.git
-.github
-docs
-examples
-extras
-tests
-README.md
-LICENSE
-install.sh
-setup-fx.sh
-fxs
+# The reference image copies no repository files. Deny the build context by
+# default so raw repository builds cannot send source, .env files, credentials,
+# or optional experiment state to the Docker daemon/builder.
+**
+!Dockerfile
+!.dockerignore

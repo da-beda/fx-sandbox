@@ -20,7 +20,7 @@ version forever, or that a Linux container is identical to the host OS.
 3. **No model policy.** If `FX_MODEL` is unset, fx resolves its own model exactly as upstream defines it.
 4. **No agent-loop policy.** Step count, context and tool-result retention stay at upstream fx defaults unless the user explicitly overrides them.
 5. **One deliberate permission override.** `fxs` defaults `FX_PERMISSION_MODE=yolo` because Docker is the authority boundary. `--ask` and `--auto` are explicit alternatives.
-6. **The image is the update unit.** The root filesystem is read-only, so `fxs` forces `FX_AUTO_UPGRADE=0`. An unpinned `fxs --build-image` resolves fx's current stable release on the host and passes that exact version into the Docker build, making the fx version part of the cache key. Explicit `--fx-version` pins bypass that lookup.
+6. **The image is the update unit.** The root filesystem is read-only, so `fxs` forces `FX_AUTO_UPGRADE=0` and blocks `fxs upgrade`. An unpinned `fxs --build-image` resolves fx's current stable release, pulls the configured base-image manifest, refreshes the OS-package cache at least once per UTC day, and passes exact cache-visible inputs into Docker. Explicit `--fx-version` pins bypass only the latest-fx lookup.
 7. **Upstream process controls pass through.** Exported `FX_*` controls are forwarded generically instead of being maintained as a semantic allowlist. Wrapper-owned controls are the explicit exceptions.
 8. **One host project tree.** The selected workspace is the only host project tree exposed by default.
 9. **Isolated state.** Each workspace gets its own private fxs home outside the project tree.
@@ -32,7 +32,7 @@ version forever, or that a Linux container is identical to the host OS.
 
 The default container has a read-only root filesystem, no Linux capabilities, `no-new-privileges`, an isolated `/tmp`, a non-root uid/gid matching the caller, and no Docker socket. The workspace is bind-mounted at `/workspace`. Per-project state is mounted at `/home/fx`.
 
-Outbound networking remains enabled because fx needs inference access. `--offline` removes container networking. Access to `host.docker.internal` is *not* added by default; `--host-gateway` is an explicit widening for local inference/services.
+Outbound networking remains enabled because fx needs inference access. `--offline` removes container networking. Access to `host.docker.internal` is *not* added by default; `--host-gateway` adds that convenience alias explicitly. The absence of the alias is not a host/LAN firewall: bridge networking can still reach routable destinations, and `--network NET` can deliberately widen the boundary further. See the threat model for the precise network assumptions.
 
 CPU, memory and PID limits are opt-in. Coding workloads should not fail because the wrapper guessed an undersized resource budget.
 
@@ -58,7 +58,7 @@ The explicit exceptions are boundary-owned values:
 - `FX_NO_OPEN_BROWSER` — forced to `1`; authentication URLs are printed from the container.
 - `FX_MODEL` / `FX_MAX_AGENT_STEPS` — forwarded explicitly so `--model` / `--steps` also work when those shell variables were not exported.
 
-## Version semantics
+## Version and image semantics
 
 A native `fx` install and an existing `fxs` image can legitimately be on different
 fx versions. Compare them explicitly when parity matters:
@@ -68,25 +68,51 @@ fx --version
 fxs -- --version
 ```
 
-Refresh the reference image to the current stable upstream fx release:
+Refresh the reference image with:
 
 ```bash
 fxs --build-image
 ```
 
-For an unpinned refresh, `fxs` first resolves `https://releases.fx.sh/latest.txt`
-on the host, then passes the exact result as `FX_VERSION=<version>` to the Docker
-build. Because the resolved version is part of Docker's build arguments, a new fx
-release changes the cache key and cannot be hidden behind a previously cached
-installer layer. Rebuilding while the stable fx version is unchanged can still
-reuse Docker's cache.
+The supported build path has three independent freshness inputs:
 
-For reproducible automation, build with `--fx-version <version>`. Explicit pins
-do not query the latest-release pointer. Tagged, signed fxs release images are
-another option when wrapper and image versions should move together.
+```text
+base-image digest      -> base filesystem freshness
+FXS_OS_REFRESH         -> OS/apt package cache freshness
+FX_VERSION             -> fx release freshness
+```
+
+`docker build --pull` checks the base-image manifest. If `FXS_OS_REFRESH` is
+unset, fxs derives the current UTC date (`YYYY-MM-DD`) and passes it as a build
+argument before the apt layer, so a user-triggered rebuild after a new UTC day
+refreshes package indexes/packages even when the Ubuntu base digest did not
+change. `FX_VERSION` is declared only after that OS layer, so an fx-only update
+can still reuse freshly built OS dependencies.
+
+For an unpinned refresh, `fxs` resolves `https://releases.fx.sh/latest.txt` on
+the host and passes that exact result as `FX_VERSION=<version>`. To pin only the
+**fx version**, build with:
+
+```bash
+fxs --build-image --fx-version <version>
+```
+
+An explicit fx pin bypasses the latest-fx lookup but does not disable the normal
+base/OS freshness behavior. `FXS_OS_REFRESH` exists as an advanced cache-control
+override; normal users should not need to set it. Tagged release builds use the
+workflow run ID as the OS refresh token so each release refreshes package inputs
+regardless of prior builder cache.
+
+None of this is a promise of bit-for-bit local image reproducibility. The Ubuntu
+base tag, distribution package repositories and canonical upstream installer are
+still external inputs. For a published release, the signed image digest is the
+immutable artifact identity; `UPSTREAM_FX_VERSION` records which fx release was
+embedded.
 
 ## Optional siblings
 
 `extras/ui` and `extras/gateway` are retained as optional experiments. They are not installed, imported or required by core fxs. The core runtime has no Python dependency.
 
-`examples/docker-compose.yml` is illustrative only. `fxs` remains the single authoritative sandbox construction path.
+Their own stdlib test suites are kept in CI so preserving them does not silently turn into preserving broken files. Their older provider/state conveniences remain intentionally separate from the core containment contract.
+
+`examples/docker-compose.yml` is illustrative only. It is a runtime example around an image already built/refreshed by `fxs`; `fxs` remains the single authoritative sandbox construction path.

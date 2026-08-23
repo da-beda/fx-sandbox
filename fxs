@@ -22,6 +22,7 @@ DRY_RUN=0
 VERBOSE="${FXS_VERBOSE:-0}"
 BUILD_IMAGE=0
 FX_VERSION="${FXS_FX_VERSION:-}"
+OS_REFRESH="${FXS_OS_REFRESH:-}"
 MEMORY="${FXS_MEMORY:-}"
 CPUS="${FXS_CPUS:-}"
 PIDS="${FXS_PIDS:-}"
@@ -62,7 +63,7 @@ Everything after the first unrecognized argument is passed to fx unchanged.
 Use `fxs -- --help` when you specifically want fx's own `--help` output.
 
 ENVIRONMENT
-  FXS_IMAGE, FXS_WORKSPACE, FXS_STATE_ROOT, FXS_NETWORK
+  FXS_IMAGE, FXS_WORKSPACE, FXS_STATE_ROOT, FXS_NETWORK, FXS_OS_REFRESH
   FXS_MEMORY, FXS_CPUS, FXS_PIDS, FXS_HOST_GATEWAY, FXS_VERBOSE
   AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN
   Exported upstream FX_* process controls are forwarded automatically.
@@ -73,6 +74,7 @@ CONTRACT
 
 fxs never falls back to native execution. The container image is the fx update
 unit, so in-container automatic self-upgrade is disabled (FX_AUTO_UPGRADE=0).
+`fxs upgrade` is blocked for the same reason; refresh with `fxs --build-image`.
 EOF_USAGE
 }
 
@@ -84,7 +86,7 @@ abs_dir() {
   local p="$1"
   case "$p" in
     '~') p="$HOME" ;;
-    '~/'*) p="${HOME}/${p#~/}" ;;
+    \~/*) p="${HOME}/${p:2}" ;;
   esac
   [[ -d "$p" ]] || die "workspace is not a directory: $p"
   (cd "$p" && pwd -P)
@@ -100,22 +102,37 @@ hash_path() {
   fi
 }
 
+validate_fx_version() {
+  local version="$1"
+  [[ -n "$version" ]] || die "fx version must not be empty"
+  case "$version" in
+    *[!0-9A-Za-z._+-]*) die "invalid fx version: $version" ;;
+  esac
+}
+
+validate_os_refresh() {
+  local token="$1"
+  [[ -n "$token" ]] || die "OS refresh token must not be empty"
+  case "$token" in
+    *[!0-9A-Za-z._+-]*) die "invalid OS refresh token: $token" ;;
+  esac
+}
+
 resolve_latest_fx_version() {
   local version=""
   if command -v curl >/dev/null 2>&1; then
-    version="$(curl -fsSL https://releases.fx.sh/latest.txt)" \
+    version="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+      https://releases.fx.sh/latest.txt)" \
       || die "could not resolve the latest stable fx release"
   elif command -v wget >/dev/null 2>&1; then
-    version="$(wget -qO- https://releases.fx.sh/latest.txt)" \
+    version="$(wget -qO- --tries=3 --timeout=30 https://releases.fx.sh/latest.txt)" \
       || die "could not resolve the latest stable fx release"
   else
     die "curl or wget is required to resolve the latest stable fx release"
   fi
   version="$(printf '%s' "$version" | tr -d '[:space:]')"
   [[ -n "$version" ]] || die "latest stable fx release response was empty"
-  case "$version" in
-    *[!0-9A-Za-z._+-]*) die "invalid latest fx release: $version" ;;
-  esac
+  validate_fx_version "$version"
   printf '%s\n' "$version"
 }
 
@@ -202,6 +219,13 @@ done
 
 valid_permission "$PERMISSION" || die "invalid FX_PERMISSION_MODE: $PERMISSION"
 
+# Upstream `fx upgrade` replaces the running executable in place. fxs runs the
+# image filesystem read-only, so forwarding that command can only fail and gives
+# the wrong update mental model. The image is the update unit instead.
+if [[ ${#FX_ARGS[@]} -gt 0 && "${FX_ARGS[0]}" == "upgrade" ]]; then
+  die "fx cannot self-upgrade inside fxs's read-only image; run: fxs --build-image"
+fi
+
 if [[ "$BUILD_IMAGE" == "1" ]]; then
   command -v docker >/dev/null 2>&1 || die "Docker is not available. Install Docker, then retry."
   docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start Docker, then retry."
@@ -214,11 +238,39 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
   }
   if [[ -z "$FX_VERSION" ]]; then
     FX_VERSION="$(resolve_latest_fx_version)"
+  else
+    validate_fx_version "$FX_VERSION"
   fi
-  build=(docker build --tag "$IMAGE" --file "$DOCKERFILE" --build-arg "FX_VERSION=$FX_VERSION")
-  build+=("$(dirname "$DOCKERFILE")")
-  log "building $IMAGE with fx $FX_VERSION"
-  exec "${build[@]}"
+  if [[ -z "$OS_REFRESH" ]]; then
+    command -v date >/dev/null 2>&1 || die "date is required to refresh OS package cache"
+    OS_REFRESH="$(date -u +%Y-%m-%d)"
+  fi
+  validate_os_refresh "$OS_REFRESH"
+
+  # The installed reference Dockerfile normally lives beside fxs state under
+  # ~/.local/share/fxs. Never use that directory as Docker build context: even
+  # unused context files are sent to the Docker daemon/builder. Build from a
+  # fresh one-file context so sessions/auth/state cannot cross that boundary.
+  build_context="$(mktemp -d "${TMPDIR:-/tmp}/fxs-build.XXXXXX")"
+  cleanup_build_context() { rm -rf "$build_context"; }
+  trap cleanup_build_context EXIT
+  cp "$DOCKERFILE" "$build_context/Dockerfile" \
+    || die "could not prepare isolated Docker build context"
+
+  build=(
+    docker build --pull
+    --tag "$IMAGE"
+    --file "$build_context/Dockerfile"
+    --build-arg "FXS_OS_REFRESH=$OS_REFRESH"
+    --build-arg "FX_VERSION=$FX_VERSION"
+    "$build_context"
+  )
+  log "building $IMAGE with fx $FX_VERSION (os-refresh=$OS_REFRESH)"
+  status=0
+  "${build[@]}" || status=$?
+  trap - EXIT
+  cleanup_build_context
+  exit "$status"
 fi
 
 WORKSPACE="$(abs_dir "$WORKSPACE")"
@@ -244,7 +296,7 @@ DOCKER_ARGS=(
   run --rm
   --read-only
   --init
-  --tmpfs /tmp:rw,nosuid,nodev
+  --tmpfs "/tmp:rw,nosuid,nodev"
   --mount "$mount_spec"
   --workdir /workspace
   --user "${uid}:${gid}"

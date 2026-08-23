@@ -64,12 +64,19 @@ image once. Otherwise install/start Docker yourself and run:
 fxs --build-image
 ```
 
-For reproducible automation, pin both sides:
+To pin both project revisions in automation, use an **existing** fxs release tag
+and an explicit fx version (replace the placeholders with real published values):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/v0.2.0/install.sh \
-  | bash -s -- --both --fxs-ref v0.2.0 --fx-version <fx-version>
+FXS_TAG='<fxs-tag>'
+FX_VERSION='<fx-version>'
+curl -fsSL "https://raw.githubusercontent.com/da-beda/fx-sandbox/${FXS_TAG}/install.sh" \
+  | bash -s -- --both --fxs-ref "$FXS_TAG" --fx-version "$FX_VERSION"
 ```
+
+This pins the fxs source revision and fx version. It does not make a locally
+rebuilt Ubuntu image bit-for-bit reproducible; use a published image digest when
+an exact image artifact identity is required.
 
 ## Use
 
@@ -137,38 +144,77 @@ fxs setup
 This isolation is intentional: native `~/.fx` is never mounted into the
 container and sessions from different host projects do not collide.
 
-## fx versions and upgrades
+## fx and fxs updates
 
-The **container image is the fx update unit**. Upstream fx can normally replace
-its own executable during auto-upgrade, but fxs intentionally runs a read-only
-image filesystem. To avoid a pointless/failing self-update path, fxs forces:
+The **container image is the fx update unit**. Upstream fx normally supports
+self-upgrade, but fxs intentionally runs a read-only image filesystem. Therefore
+fxs forces:
 
 ```text
 FX_AUTO_UPGRADE=0
 ```
 
-Update the reference image instead:
+and blocks `fxs upgrade` with guidance to refresh the image instead:
 
 ```bash
 fxs --build-image
 ```
 
-An existing image can legitimately lag behind native fx. When exact parity
-matters, compare explicitly:
+A supported image refresh has three independent freshness inputs:
+
+```text
+base-image digest      -> base filesystem freshness
+FXS_OS_REFRESH         -> OS/apt package cache freshness
+FX_VERSION             -> fx release freshness
+```
+
+`fxs --build-image` uses `docker build --pull` to check the current base-image
+manifest. If `FXS_OS_REFRESH` is unset, fxs derives the current UTC date and uses
+it as a cache key before the apt layer, so rebuilding on a new day refreshes
+package indexes/packages even when the Ubuntu base digest has not changed. The
+fx installation is a later layer keyed by the exact fx version, so an fx-only
+release does not needlessly invalidate already-fresh OS dependencies.
+
+An existing image can legitimately lag behind native fx. Compare versions when
+parity matters:
 
 ```bash
 fx --version
 fxs -- --version
 ```
 
-For reproducibility, build with a pinned fx version:
+Pin only the fx version with:
 
 ```bash
 fxs --build-image --fx-version <version>
 ```
 
-Tagged fxs releases also publish signed multi-architecture reference images and
-release artifacts so the wrapper and fx image can be pinned together.
+An explicit fx pin skips the latest-fx lookup but keeps the normal base/OS
+freshness behavior. `FXS_OS_REFRESH` is an advanced cache-control override and
+normally should be left unset. The Ubuntu base tag, distribution package
+repositories and upstream canonical installer remain external inputs, so a local
+fx-version pin is not a bit-for-bit image reproducibility guarantee.
+
+For tagged fxs releases, the release workflow refreshes OS packages for each
+release run, records `UPSTREAM_FX_VERSION`, publishes amd64/arm64 images, and
+signs the immutable image digest. Normal CI also builds and executes an arm64
+reference image under QEMU so arm64 is not first exercised on release day.
+
+`fxs` itself has no background updater. Refresh the installed wrapper and
+reference Dockerfile explicitly by rerunning the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/install.sh \
+  | bash -s -- --fxs-only --no-build
+```
+
+Or refresh the wrapper **and** rebuild the image in one explicit operation when
+Docker is available:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/da-beda/fx-sandbox/main/install.sh \
+  | bash -s -- --fxs-only --build-image
+```
 
 ## No startup writes to the repository
 
@@ -190,17 +236,25 @@ The wrapper does not guess a CPU or RAM budget. Limits are opt-in:
 fxs --memory 8g --cpus 8 --pids 1024
 ```
 
-Outbound networking is enabled by default for inference. Disable it with
-`--offline`.
+Outbound networking is enabled by default for inference. Disable it with:
+
+```bash
+fxs --offline
+```
 
 `host.docker.internal` is **not** added by default. When local inference or
-another intentional host service requires it:
+another intentional host service requires that convenience alias:
 
 ```bash
 fxs --host-gateway
 ```
 
-That is an explicit widening of the boundary.
+That is an explicit widening of the boundary, but the absence of the alias is
+**not** a host/LAN firewall. Docker bridge networking can still reach routable
+Internet/LAN destinations and, depending on platform/routing/service bindings,
+may reach host services by other addresses. `--network NET` is an advanced
+escape hatch; using a more permissive network such as host networking further
+reduces isolation. Use `--offline` when network denial is required.
 
 ## Custom development images
 
@@ -235,8 +289,14 @@ translation or a browser UI.
 - `extras/ui/` retains the browser UI experiment.
 - `examples/docker-compose.yml` is illustrative only; `fxs` is the authoritative sandbox launcher.
 
-These extras can evolve or disappear independently without changing the core
-containment contract.
+These extras can evolve independently without changing the core containment
+contract. Their stdlib unit suites run in CI, but their older provider/state
+conveniences remain intentionally separate from core fxs.
+
+The Compose example is runtime-only: build or refresh the image through `fxs`
+first, then use Compose only when you explicitly want that illustrative shape.
+It intentionally uses an ephemeral home instead of reproducing fxs's per-project
+persistent-state policy.
 
 ## Security boundary
 
@@ -249,6 +309,12 @@ A host-side credential/inference broker is the preferred future hardening for
 reusable secrets, but it should remain a separate component rather than
 expanding core fxs.
 
+The release workflows pin third-party GitHub Actions to immutable commit SHAs;
+Dependabot is configured to propose updates to those pins. The upstream fx
+installer/CDN, base image registry and distribution package repositories remain
+explicit trusted build inputs. See the threat model for the exact supply-chain
+boundary.
+
 See [docs/DESIGN.md](docs/DESIGN.md) and
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
@@ -256,9 +322,14 @@ See [docs/DESIGN.md](docs/DESIGN.md) and
 
 ```bash
 bash -n fxs install.sh setup-fx.sh tests/*.sh
+shellcheck --severity=warning fxs install.sh setup-fx.sh tests/*.sh
 bash tests/run.sh
+python3 extras/gateway/test_gateway.py
+python3 extras/ui/test_server.py
 ```
 
-CI runs the shell tests on Linux and macOS and builds the reference image through
-fx's live canonical installer. Tagged releases also build and keylessly sign
-multi-architecture reference images for `linux/amd64` and `linux/arm64`.
+CI runs static shell/YAML lint, the core shell tests on Linux and macOS, the
+retained extras' stdlib suites, Compose validation, live current-stable fx through
+the real wrapper, and an executable arm64 image smoke test. Tagged releases build
+and keylessly sign multi-architecture reference images for `linux/amd64` and
+`linux/arm64`.
