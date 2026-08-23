@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   stable:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,7 +24,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(curl -fsSL https://releases.fx.sh/latest.txt | tr -d '[:space:]')"
+          version="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+            https://releases.fx.sh/latest.txt | tr -d '[:space:]')"
           [[ -n "$version" ]]
           case "$version" in
             *[!0-9A-Za-z._+-]*) echo "invalid fx version: $version" >&2; exit 1 ;;
@@ -41,9 +43,16 @@ jobs:
         env:
           FXS_IMAGE: fxs-upstream-canary
           FXS_STATE_ROOT: ${{ runner.temp }}/fxs-state
+          EXPECTED_FX_VERSION: ${{ steps.fx.outputs.version }}
         run: |
           set -euo pipefail
-          ./fxs -- --version
+          actual="$(./fxs -- --version | tr -d '[:space:]')"
+          expected="${EXPECTED_FX_VERSION#v}"
+          [[ "$actual" == "$expected" ]] || {
+            echo "fx version mismatch: expected $expected, got $actual" >&2
+            exit 1
+          }
+
           ./fxs -- --help > /tmp/fx-help.txt
           test -s /tmp/fx-help.txt
 
