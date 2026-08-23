@@ -71,13 +71,16 @@ grep -Fq 'FX_AUTO_UPGRADE=0' "$ROOT/examples/docker-compose.yml" \
   || fail "Compose example must disable in-image fx self-upgrade"
 
 # Retained optional surfaces get their own tests without becoming core runtime
-# dependencies. Release metadata must record the embedded upstream fx version.
+# dependencies. Release metadata must record the embedded upstream fx version,
+# and normal CI must smoke-test the release's secondary architecture.
 grep -Fq 'python3 extras/gateway/test_gateway.py' "$ROOT/.github/workflows/ci.yml" \
   || fail "gateway extras are not exercised in CI"
 grep -Fq 'python3 extras/ui/test_server.py' "$ROOT/.github/workflows/ci.yml" \
   || fail "UI extras are not exercised in CI"
 grep -Fq 'shellcheck --severity=warning' "$ROOT/.github/workflows/ci.yml" \
   || fail "shell lint is not exercised in CI"
+grep -Fq -- '--platform linux/arm64' "$ROOT/.github/workflows/ci.yml" \
+  || fail "arm64 reference-image smoke test is missing from CI"
 grep -Fq 'UPSTREAM_FX_VERSION' "$ROOT/.github/workflows/release-image.yml" \
   || fail "release does not record embedded fx version"
 [[ -f "$ROOT/.github/workflows/upstream-canary.yml" ]] \
