@@ -71,11 +71,15 @@ class HttpBodyLimits(unittest.TestCase):
         self.assertEqual(http_limits.parse_content_length("0", 10), 0)
         self.assertEqual(http_limits.parse_content_length("10", 10), 10)
 
-    def test_content_length_rejects_negative_invalid_and_overflow(self):
-        for raw in ("-1", "abc", "11"):
+    def test_content_length_rejects_negative_and_invalid(self):
+        for raw in ("-1", "abc"):
             with self.subTest(raw=raw):
-                with self.assertRaises(http_limits.BodyLimitError):
+                with self.assertRaises(http_limits.InvalidContentLength):
                     http_limits.parse_content_length(raw, 10)
+
+    def test_content_length_rejects_oversized_request(self):
+        with self.assertRaises(http_limits.RequestBodyTooLarge):
+            http_limits.parse_content_length("11", 10)
 
     def test_default_limits_are_large_but_finite(self):
         self.assertEqual(http_limits.MODEL_CATALOG_BYTES, 4 * 1024 * 1024)
