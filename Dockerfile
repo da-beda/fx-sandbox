@@ -6,10 +6,20 @@ LABEL org.opencontainers.image.title="fxs" \
       org.opencontainers.image.description="Minimal reference runtime for fx-sandbox" \
       org.opencontainers.image.source="https://github.com/da-beda/fx-sandbox"
 
-# Keep OS dependencies in a layer that does not depend on FX_VERSION. When only
-# fx changes, Docker can reuse this layer; when the Ubuntu base digest changes,
-# --pull on the fxs build path correctly invalidates it.
+# OS package freshness is a separate cache axis from FX_VERSION. Supported
+# builders supply a small refresh token (daily for local fxs builds, unique per
+# tagged release), so package updates are not hidden indefinitely behind a
+# cached apt layer while an fx-only update can still reuse that layer.
+ARG FXS_OS_REFRESH
 RUN set -eu; \
+    [ -n "$FXS_OS_REFRESH" ] || { \
+      echo 'FXS_OS_REFRESH is required; use: fxs --build-image' >&2; \
+      exit 1; \
+    }; \
+    case "$FXS_OS_REFRESH" in \
+      *[!0-9A-Za-z._+-]*) echo "invalid FXS_OS_REFRESH: $FXS_OS_REFRESH" >&2; exit 1 ;; \
+    esac; \
+    : "os-refresh=$FXS_OS_REFRESH"; \
     apt-get update -qq; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates curl tar git bash; \
