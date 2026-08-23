@@ -1351,10 +1351,19 @@ class Stream:
             events.extend(self._finalize(choice["finish_reason"], chunk.get("usage") or {}))
         return events
 
-    def close(self) -> list[bytes]:
+    def close(self, terminal: bool = False) -> list[bytes]:
+        """Close a stream without converting bare EOF into success.
+
+        A provider finish reason / Responses terminal event marks ``finished``
+        before this method runs. ``terminal=True`` is reserved for an explicit
+        SSE ``[DONE]`` sentinel. A bare transport EOF is incomplete evidence and
+        must fail instead of being committed as a successful turn.
+        """
         if self.finished:
             return []
-        return self._finalize("stop", {})
+        if terminal:
+            return self._finalize("stop", {})
+        return self.fail("upstream stream ended before a terminal event")
 
     def fail(self, msg: str = "") -> list[bytes]:
         if not msg:
@@ -2000,11 +2009,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 conv = ResponseStream(allowed) if used_responses else Stream(allowed)
             first = False
             try:
+                saw_done = False
                 for data in read_sse_data(resp):
                     if data.strip() == "[DONE]":
+                        saw_done = True
                         break
                     self._write_search_events(conv.consume(data), conv)
-                self._write_search_events(conv.close(), conv)
+                self._write_search_events(conv.close(terminal=saw_done), conv)
             except Exception as e:
                 self._write_events(conv.fail(str(e)))
                 return
