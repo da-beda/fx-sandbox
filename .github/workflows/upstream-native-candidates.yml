@@ -1,0 +1,136 @@
+name: upstream-native-candidates
+
+on:
+  pull_request:
+    branches: [gateway/native-tool-probe]
+    paths:
+      - ".github/workflows/upstream-native-candidates.yml"
+  schedule:
+    - cron: "47 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: fx PR #${{ matrix.pr }} native handoff
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 159
+            label: custom_endpoint
+            expected_chat_contract: custom_endpoint
+            expect_responses: "false"
+          - pr: 168
+            label: fx_openai
+            expected_chat_contract: fx_openai
+            expect_responses: "true"
+    steps:
+      - name: Checkout fx-sandbox harness
+        uses: actions/checkout@v7
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+          cache-key: upstream-native-${{ matrix.pr }}
+
+      - name: Fetch upstream candidate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir upstream-fx
+          git -C upstream-fx init
+          git -C upstream-fx remote add origin https://github.com/vercel-labs/fx.git
+          git -C upstream-fx fetch --depth=1 origin "pull/${{ matrix.pr }}/head"
+          git -C upstream-fx checkout --detach FETCH_HEAD
+          sha="$(git -C upstream-fx rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          printf 'Upstream PR #%s candidate: `%s`\n' '${{ matrix.pr }}' "$sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build upstream candidate
+        id: build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream-fx
+          zig build -Doptimize=ReleaseSafe
+          test -x zig-out/bin/fx
+          ./zig-out/bin/fx --version
+
+      - name: Probe native text and tool contracts
+        id: probe
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        env:
+          FX_SKIP_ONBOARDING: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 extras/gateway/native_fx.py \
+            --fx "$PWD/upstream-fx/zig-out/bin/fx" \
+            --json --probe-transport --timeout 20 | tee candidate.json
+
+      - name: Evaluate expected handoff contract
+        if: always()
+        env:
+          PR_NUMBER: ${{ matrix.pr }}
+          LABEL: ${{ matrix.label }}
+          EXPECTED_CHAT_CONTRACT: ${{ matrix.expected_chat_contract }}
+          EXPECT_RESPONSES: ${{ matrix.expect_responses }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          build = os.environ.get("BUILD_OUTCOME", "")
+          probe = os.environ.get("PROBE_OUTCOME", "")
+          expected = os.environ["EXPECTED_CHAT_CONTRACT"]
+          expect_responses = os.environ.get("EXPECT_RESPONSES") == "true"
+          result = {}
+          path = Path("candidate.json")
+          if path.is_file():
+              result = json.loads(path.read_text(encoding="utf-8"))
+
+          chat_text = expected in (result.get("openai_chat_contracts") or [])
+          chat_tools = expected in (result.get("openai_chat_tool_contracts") or [])
+          responses_text = expected in (result.get("openai_responses_contracts") or [])
+          responses_tools = expected in (result.get("openai_responses_tool_contracts") or [])
+          expected_ready = chat_text and chat_tools and (
+              (responses_text and responses_tools) if expect_responses else True
+          )
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as fh:
+              fh.write("\n| Check | Result |\n| --- | --- |\n")
+              fh.write(f"| Build | `{build}` |\n")
+              fh.write(f"| Probe step | `{probe}` |\n")
+              fh.write(f"| Expected Chat text `{expected}` | `{chat_text}` |\n")
+              fh.write(f"| Expected Chat tool round-trip `{expected}` | `{chat_tools}` |\n")
+              if expect_responses:
+                  fh.write(f"| Expected Responses text `{expected}` | `{responses_text}` |\n")
+                  fh.write(f"| Expected Responses tool round-trip `{expected}` | `{responses_tools}` |\n")
+              fh.write(f"| Candidate satisfies declared handoff surface | **`{expected_ready}`** |\n")
+              if result:
+                  fh.write("\n```json\n" + json.dumps(result, indent=2, sort_keys=True) + "\n```\n")
+
+          # Candidate PRs are drafts and may be broken at any given head. This
+          # lane is observational by design: record drift without making our
+          # own adapter PRs fail because an upstream draft regressed.
+          print(json.dumps({
+              "pr": os.environ["PR_NUMBER"],
+              "sha": os.environ.get("CANDIDATE_SHA", ""),
+              "expected_ready": expected_ready,
+              "probe": result,
+          }, sort_keys=True))
+          PY
